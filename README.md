@@ -64,7 +64,9 @@ without warning:
 Pigeon → Wasp → Owl → Vampire.
 
 **Forage.** Four kinds of floor food (Algae, Berries, Krill, Mushroom). Each is
-worth **0.5 XP** and refills your boost meter.
+worth **0.2 XP** and tops the boost meter up by **7%** — a piece of forage nudges
+the meter, it never fills it. The meter is only ever topped up by grazing, never
+by boosting itself.
 
 **Evolution.** The XP needed for the *next* rank rises as you climb:
 
@@ -80,15 +82,16 @@ into the new rank. Once you're a Vampire the bar keeps filling as a score.
 **higher** rank can eat you. Equal ranks are harmless to each other. Touching is
 instant death for the loser — there is no health bar.
 
-**Killing** a creature transfers **25% of its XP** to you, plus a chunk of boost.
+**Killing** a creature transfers **30% of its XP** to you, plus **60% of the
+boost meter** — hunting is by far the fastest route to a boost burst.
 
 **Dying** costs you nothing but XP: you respawn after ~2.4s keeping **50% of the
-XP you had**, at a spot far from anything bigger, with a **5s spawn shield**
-so you can't be insta-killed on arrival.
+XP you had**, at a spot far from anything bigger, with a **5s spawn shield** so
+you can't be insta-killed on arrival.
 
 **Boost.** The meter holds at most **5 seconds**. Holding the button spends it
-at 1x speed x2.5. It only comes back by eating - 1.2s per piece of forage,
-1.75s per kill.
+at 1x speed x2.5. It comes back only by eating: 7% per piece of forage, 60% per
+kill.
 
 ## Staying alive
 

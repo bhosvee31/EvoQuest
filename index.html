@@ -195,8 +195,8 @@
     <ol>
       <li><b>Move</b> &mdash; your creature walks toward your cursor.</li>
       <li><b>Boost</b> &mdash; hold <b>left click</b> or <b>Spacebar</b> for a speed burst.</li>
-      <li><b>Eat</b> &mdash; floor food is <b>0.5 XP</b>. You may eat anything <b>below</b> your rank.</li>
-      <li><b>Hunt</b> &mdash; killing another creature gives you <b>25%</b> of their XP.</li>
+      <li><b>Eat</b> &mdash; floor food is <b>0.2 XP</b> and nudges your boost. You may eat anything <b>below</b> your rank.</li>
+      <li><b>Hunt</b> &mdash; killing another creature gives you <b>30%</b> of their XP and most of your boost back.</li>
       <li><b>Survive</b> &mdash; if you are eaten you return with <b>50%</b> of your XP.</li>
     </ol>
     <button id="go">ENTER THE FOOD CHAIN</button>
@@ -518,7 +518,9 @@
    CONFIG
    ============================================================ */
 const WORLD      = { w: 4800, h: 3400 };
-const FOOD_COUNT = 800;
+const FOOD_COUNT = 1300;  // a Plankton (rank 1) has nothing below it to kill, so
+                          // forage is its ONLY boost income -- the field has to be
+                          // dense enough that a grazer keeps the meter topped up
 const NPC_COUNT  = 100;   // creature density is the single biggest difficulty
                          // dial -- every creature here is a potential predator
 const SCALE      = 3;    // creature sprite zoom
@@ -526,11 +528,14 @@ const FOOD_SCALE = 2;    // food sits a size class below creatures on purpose
 
 const BOOST_MAX    = 5.0;   // seconds of boost available
 const BOOST_MULT   = 2.5;   // speed multiplier while boosting (must outrun your hunters)
-const FOOD_XP      = 0.5;   // xp per floor food
-const FOOD_ENERGY  = 1.2;   // boost seconds refunded per food (the boost cap
-                             // stays at BOOST_MAX; this is the refill rate)
-const KILL_ENERGY  = 1.75;  // boost seconds refunded per kill
-const KILL_XP_SHARE= 0.25;  // share of victim's xp taken
+const FOOD_XP      = 0.2;   // xp per floor food
+const FOOD_ENERGY  = 0.35;  // boost seconds per food = 7% of BOOST_MAX. A piece of
+                             // forage tops the meter up, it never fills it.
+const KILL_ENERGY  = 3.0;   // boost seconds per kill = 60% of the meter. Hunting
+                             // is meant to be the fast route to a boost burst;
+                             // note a Plankton (rank 1) has nothing below it to
+                             // kill, so it can only ever boost from foraging
+const KILL_XP_SHARE= 0.30;  // share of victim's xp taken
 const DEATH_XP_KEEP= 0.5;   // xp retained after being eaten
 const RESPAWN_TIME = 2.4;
 const SPAWN_SAFE  = 5.0;    // seconds of protection after (re)spawning
@@ -959,7 +964,7 @@ function buildCodex(){
     cell.appendChild(c);
     const cap = document.createElement("div");
     const rd = RANKS.filter(r=>r.key===id)[0];
-    cap.textContent = sp.label + (rd ? "  \u00b7  " + rd.need + " XP" : "  \u00b7  0.5 XP");
+    cap.textContent = sp.label + (rd ? "  \u00b7  " + rd.need + " XP" : "  \u00b7  " + FOOD_XP + " XP");
     cell.appendChild(cap);
     el.codexGrid.appendChild(cell);
   });
@@ -1217,7 +1222,7 @@ function kill(pred, prey){
     refillBoost(pred, KILL_ENERGY);
     Sfx.kill();
     pushFeed("Ate <b style='color:" + RANKS[prey.rank].color + "'>" + RANKS[prey.rank].name +
-             "</b> &nbsp;+" + gain.toFixed(1) + " XP (25%)", "kill");
+             "</b> &nbsp;+" + gain.toFixed(1) + " XP (" + Math.round(KILL_XP_SHARE * 100) + "%)", "kill");
   } else if (prey.isPlayer){
     const kept = player.xp * DEATH_XP_KEEP;
     addXP(pred, gain);
@@ -1488,7 +1493,8 @@ window.EvoQuest = {
   KILL_XP_SHARE: KILL_XP_SHARE, DEATH_XP_KEEP: DEATH_XP_KEEP,
   BOOST_MULT: BOOST_MULT, NPC_SPAWN_SAFE: NPC_SPAWN_SAFE,
   PLAYER_PICKUP: PLAYER_PICKUP, PLAYER_HUNT_GAP: PLAYER_HUNT_GAP,
-  SPAWN_SAFE: SPAWN_SAFE,
+  SPAWN_SAFE: SPAWN_SAFE, KILL_ENERGY: KILL_ENERGY, FOOD_ENERGY: FOOD_ENERGY,
+  STRIKE_TIME: STRIKE_TIME,
   world: WORLD,
   get player(){ return player; },
   get cam(){ return cam; },
