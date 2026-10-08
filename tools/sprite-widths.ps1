@@ -2,7 +2,7 @@
 # mistakes in the pixel data are easy to spot.
 param([string]$Html = (Join-Path $PSScriptRoot "..\index.html"))
 
-$raw = Get-Content -LiteralPath $Html -Raw
+$raw = [System.IO.File]::ReadAllText($Html, [System.Text.Encoding]::UTF8)
 $m = [regex]::Match($raw, '(?s)<script id="sprites-data" type="application/json">(.*?)</script>')
 if (-not $m.Success) { throw "no sprites-data block" }
 $defs = $m.Groups[1].Value | ConvertFrom-Json

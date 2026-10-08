@@ -416,7 +416,10 @@ for ($i = 0; $i -lt $keys.Count; $i++) {
 }
 [void]$sb.AppendLine("}")
 
-$doc = Get-Content -LiteralPath $Html -Raw
+# Read/write as explicit UTF-8. Get-Content -Raw would decode a BOM-less UTF-8
+# file using the ANSI code page on PowerShell 5.1, mangling every non-ASCII
+# character (and compounding the damage on each run).
+$doc = [System.IO.File]::ReadAllText($Html, [System.Text.Encoding]::UTF8)
 $block = '<script id="sprites-data" type="application/json">' + "`n" + $sb.ToString() + '</script>'
 $rx = [regex]::new('(?s)<script id="sprites-data" type="application/json">.*?</script>')
 if (-not $rx.IsMatch($doc)) { throw "no sprites-data script block found in $Html" }

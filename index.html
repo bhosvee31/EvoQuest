@@ -41,28 +41,43 @@
   #boostText.hot{color:#ffd75e;}
 
   /* ---------- ladder ---------- */
-  #ladder{position:absolute;top:14px;right:14px;width:172px;padding:9px 9px 8px;}
-  #ladder h4{margin:0 0 6px;font-size:10px;letter-spacing:1.4px;color:var(--dim);font-weight:600;}
-  .rung{display:flex;align-items:center;gap:6px;font-size:11.5px;padding:2px 5px;border-radius:6px;
-    color:#93b2c9;line-height:1.5;}
-  .rung .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto;opacity:.85;}
-  .rung.done{color:#8fe6b4;}
-  .rung.now{background:rgba(90,209,255,.16);color:#fff;box-shadow:inset 0 0 0 1px rgba(90,209,255,.4);font-weight:700;}
-  .rung.now .dot{box-shadow:0 0 8px currentColor;}
-  .rung small{margin-left:auto;color:var(--dim);font-size:9px;}
-  .rung.now small{color:#bfe3ff;}
+  #card{position:absolute;top:12px;left:12px;width:266px;padding:9px 10px;display:flex;gap:10px;
+    transition:box-shadow .2s, border-color .2s;}
+  #card.danger{border-color:rgba(255,90,110,.75);box-shadow:0 0 0 1px rgba(255,90,110,.35), 0 6px 26px rgba(0,0,0,.5);}
+  #portrait{width:48px;height:48px;flex:0 0 48px;border-radius:8px;background:rgba(0,0,0,.35);
+    border:1px solid var(--line);image-rendering:pixelated;}
+  .grow{flex:1;min-width:0;}
+  .line1{display:flex;align-items:baseline;gap:7px;}
+  #rankName{font-size:15px;font-weight:700;letter-spacing:.3px;}
+  #rankNum{font-size:9px;color:var(--dim);}
+  #xpText{font-size:11px;color:#bfe3ff;margin:3px 0 4px;}
+  #xpText b{color:#fff;}
+  #nextText{font-size:11px;color:#cfe8ff;margin:5px 0 4px;font-weight:600;}
+  .bar{height:9px;border-radius:5px;background:rgba(0,0,0,.45);overflow:hidden;
+    border:1px solid var(--line);}
+  .bar > i{display:block;height:100%;width:0%;border-radius:4px;transition:width .12s linear;}
+  #xpFill{background:linear-gradient(90deg,#2ea8ff,#7ef0b4);box-shadow:0 0 10px rgba(90,209,255,.5);}
+  #boostFill{background:linear-gradient(90deg,#ff9f1c,#ffe066);box-shadow:0 0 10px rgba(255,180,60,.5);}
+  #boostText{font-size:10px;color:var(--dim);margin-top:4px;}
+  #boostText.hot{color:#ffd75e;}
 
-  /* ---------- stats + minimap ---------- */
-  #stats{position:absolute;bottom:14px;left:14px;padding:9px 12px;font-size:11px;line-height:1.7;
-    display:grid;grid-template-columns:auto auto;gap:0 16px;}
-  #stats span{color:var(--dim);}
-  #stats b{color:#eaf7ff;font-weight:700;}
-  #mini{position:absolute;bottom:14px;right:14px;width:186px;height:126px;
-    background:var(--panel);border:1px solid var(--line);border-radius:10px;image-rendering:pixelated;}
+  /* ---------- danger readout ---------- */
+  #danger{position:absolute;top:12px;left:50%;transform:translateX(-50%);padding:6px 14px;
+    font-size:11.5px;font-weight:700;color:#ffd2d8;display:none;align-items:center;gap:7px;
+    border-radius:8px;background:rgba(60,4,14,.82);border:1px solid rgba(255,90,110,.6);}
+  #danger.on{display:flex;animation:pulse .7s ease-in-out infinite;}
+  #danger b{color:#fff;}
+  @keyframes pulse{0%,100%{opacity:.72}50%{opacity:1}}
+
+  /* ---------- one-line tally ---------- */
+  #stats{position:absolute;bottom:12px;left:12px;font-size:10.5px;color:var(--dim);
+    display:flex;gap:12px;}
+  #stats b{color:#cfe4f5;font-weight:700;}
+  #stats i{font-style:normal;opacity:.4;}
 
   /* ---------- feed ---------- */
-  #feed{position:absolute;left:14px;top:0;width:330px;padding-top:150px;}
-  .feed-item{font-size:11px;padding:3px 9px;margin-bottom:4px;border-radius:6px;
+  #feed{position:absolute;left:12px;bottom:36px;width:250px;}
+  .feed-item{font-size:10.5px;padding:2px 8px;margin-bottom:3px;border-radius:6px;
     background:rgba(6,14,24,.7);border-left:3px solid var(--accent);color:#cfe8ff;
     animation:fadeIn .18s ease-out;}
   .feed-item.kill{border-left-color:#4ade80;color:#d6ffe6;}
@@ -86,8 +101,16 @@
     background:rgba(4,10,18,.86);pointer-events:auto;}
   #codex.on{display:flex;}
   #codexBox{max-width:860px;width:92%;max-height:88%;overflow:auto;padding:20px 24px;}
-  #codexBox h3{margin:0 0 4px;font-size:16px;}
-  #codexBox p{margin:0 0 16px;font-size:11px;color:var(--dim);}
+  #codexBox h3{margin:0 0 4px;font-size:15px;}
+  #codexBox p{margin:0 0 14px;font-size:11px;color:var(--dim);}
+  #rungs{display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:6px;}
+  .rung{display:flex;align-items:center;gap:7px;font-size:11.5px;padding:5px 9px;border-radius:7px;
+    color:#93b2c9;background:rgba(0,0,0,.3);border:1px solid var(--line);}
+  .rung .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto;}
+  .rung.done{color:#8fe6b4;}
+  .rung.now{color:#fff;font-weight:700;border-color:rgba(90,209,255,.6);background:rgba(90,209,255,.14);}
+  .rung small{margin-left:auto;color:var(--dim);font-size:9.5px;font-weight:400;}
+  .rung.now small{color:#bfe3ff;}
   #codexGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:12px;}
   .codexCell{text-align:center;background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:9px;padding:9px 6px;}
   .codexCell canvas{image-rendering:pixelated;}
@@ -121,28 +144,16 @@
   <div id="card" class="panel">
     <canvas id="portrait" width="112" height="112"></canvas>
     <div class="grow">
-      <div class="line1"><span id="rankName">Plankton</span><span id="rankNum">RANK 1 / 10</span></div>
-      <div id="xpText"><b>0.0</b> / 5.0 XP <span style="color:#7e9cb5">&mdash; next rank</span></div>
+      <div class="line1"><span id="rankName">Plankton</span><span id="rankNum">1 / 10</span></div>
+      <div id="xpText"><b>0.0</b> / 5 XP</div>
       <div class="bar"><i id="xpFill"></i></div>
-      <div id="nextText">Evolve into <b style="color:#bfe3ff">Fish</b> &middot; needs 7 XP</div>
+      <div id="nextText">Next: <b style="color:#bfe3ff">Fish</b></div>
       <div class="bar"><i id="boostFill"></i></div>
-      <div id="boostText">BOOST 0.0s / 5.0s &mdash; hold <b>SPACE</b> or <b>CLICK</b></div>
+      <div id="boostText">BOOST 0.0s &mdash; hold <b>SPACE</b> / <b>CLICK</b></div>
     </div>
   </div>
 
-  <div id="ladder" class="panel">
-    <h4>RANK LADDER</h4>
-    <div id="rungs"></div>
-  </div>
-
-  <div id="stats" class="panel">
-    <span>Food eaten</span><b id="sFood">0</b>
-    <span>Creatures eaten</span><b id="sKills">0</b>
-    <span>Times eaten</span><b id="sDeaths">0</b>
-    <span>Total XP</span><b id="sXp">0.0</b>
-  </div>
-
-  <canvas id="mini" width="186" height="126"></canvas>
+  <div id="danger"><span>&#9888;</span><span id="dangerText">HUNTED BY <b id="dangerWho">Wasp</b></span></div>
 
   <div id="feed"></div>
   <div id="center">
@@ -151,16 +162,26 @@
   </div>
   <div id="deathVeil"></div>
 
+  <div id="stats">
+    <span>Eaten <b id="sFood">0</b></span><i>&middot;</i>
+    <span>Kills <b id="sKills">0</b></span><i>&middot;</i>
+    <span>Deaths <b id="sDeaths">0</b></span><i>&middot;</i>
+    <span>Total XP <b id="sXp">0.0</b></span>
+  </div>
+
   <div id="help" class="panel">
     <b>Mouse</b> steer &nbsp;&middot;&nbsp; <b>Hold LMB / Space</b> boost &nbsp;&middot;&nbsp;
-    <b>C</b> bestiary &nbsp;&middot;&nbsp; <b>M</b> sound &nbsp;&middot;&nbsp; <b>R</b> restart &nbsp;&middot;&nbsp;
-    <b>Esc</b> pause &nbsp;&middot;&nbsp; <span id="dlLink" style="pointer-events:auto;cursor:pointer;text-decoration:underline">download offline copy</span>
+    <b>C</b> guide &nbsp;&middot;&nbsp; <b>R</b> restart &nbsp;&middot;&nbsp;
+    <span id="dlLink" style="pointer-events:auto;cursor:pointer;text-decoration:underline">download</span>
   </div>
 
   <div id="codex">
     <div id="codexBox" class="panel">
-      <h3>Bestiary &amp; Forage</h3>
-      <p>Every sprite in EvoQuest, drawn from pixel data &mdash; no image files. Press <b>C</b> or click to close.</p>
+      <h3>Rank ladder</h3>
+      <p>XP needed to reach each rank &mdash; leftover XP carries over. Press <b>C</b> or click to close.</p>
+      <div id="rungs"></div>
+      <h3 style="margin-top:22px">Bestiary &amp; forage</h3>
+      <p>Every sprite in EvoQuest, drawn from pixel data &mdash; no image files.</p>
       <div id="codexGrid"></div>
     </div>
   </div>
@@ -496,22 +517,34 @@
 /* ============================================================
    CONFIG
    ============================================================ */
-const WORLD      = { w: 3000, h: 2100 };
-const FOOD_COUNT = 380;
-const NPC_COUNT  = 180;
+const WORLD      = { w: 4800, h: 3400 };
+const FOOD_COUNT = 800;
+const NPC_COUNT  = 100;   // creature density is the single biggest difficulty
+                         // dial -- every creature here is a potential predator
 const SCALE      = 3;    // creature sprite zoom
 const FOOD_SCALE = 2;    // food sits a size class below creatures on purpose
 
 const BOOST_MAX    = 5.0;   // seconds of boost available
-const BOOST_MULT   = 1.95;  // speed multiplier while boosting
+const BOOST_MULT   = 2.5;   // speed multiplier while boosting (must outrun your hunters)
 const FOOD_XP      = 0.5;   // xp per floor food
-const FOOD_ENERGY  = 0.45;  // boost seconds refunded per food
+const FOOD_ENERGY  = 1.2;   // boost seconds refunded per food (the boost cap
+                             // stays at BOOST_MAX; this is the refill rate)
 const KILL_ENERGY  = 1.75;  // boost seconds refunded per kill
 const KILL_XP_SHARE= 0.25;  // share of victim's xp taken
 const DEATH_XP_KEEP= 0.5;   // xp retained after being eaten
 const RESPAWN_TIME = 2.4;
-const SPAWN_SAFE  = 2.6;    // seconds of protection after (re)spawning
-const SPAWN_CLEAR = 620;    // respawn this far from anything higher rank
+const SPAWN_SAFE  = 5.0;    // seconds of protection after (re)spawning
+const SPAWN_CLEAR = 700;    // respawn this far from anything higher rank
+const NPC_SPAWN_SAFE = 900; // never reappear an NPC closer than this to the player
+const STRIKE_TIME   = 0.6;  // telegraph before a creature that is touching you
+                             // actually swallows you -- long enough to boost away
+
+/* Anti-frustration tuning. Without these, every creature above your rank
+   swarms you and a low rank simply cannot get anywhere. */
+const PLAYER_PICKUP   = 300;  // how close a creature must be to notice the player
+const PLAYER_HUNT_GAP = 2;    // creatures this many ranks above you will chase you
+                               // (they will still eat you on contact, they just
+                               //  will not come looking)
 
 const RANKS = [
   { key:"plankton",  name:"Plankton",  need:5,  speed:62,  color:"#3ad17f" },
@@ -625,6 +658,7 @@ const Sfx = {
     o.start(t); o.stop(t + dur + 0.02);
   },
   eat(){ this.tone(760, 0.07, "square", 0.035, 1120); },
+  strike(){ this.tone(150, 0.12, "sawtooth", 0.04, 70); },
   kill(){ this.tone(420, 0.13, "sawtooth", 0.05, 900); this.tone(180, 0.16, "square", 0.03, 120); },
   death(){ this.tone(300, 0.4, "sawtooth", 0.055, 60); },
   evolve(){ [523,659,784,1047].forEach((f,i)=> setTimeout(()=> this.tone(f,0.14,"triangle",0.05), i*72)); },
@@ -653,6 +687,8 @@ function makeCritter(rank, x, y, isPlayer){
     boost: isPlayer ? BOOST_MAX : 0,
     boosting: false,
     invuln: isPlayer ? SPAWN_SAFE : 0,
+    huntedBy: null,
+    strikeT: 0,
     burst: 0,
     flash: 0,
     dead: false, deadT: 0,
@@ -799,6 +835,7 @@ document.getElementById("dlLink").addEventListener("click", downloadSelf);
    HUD
    ============================================================ */
 const el = {
+  card:     document.getElementById("card"),
   rankName: document.getElementById("rankName"),
   rankNum:  document.getElementById("rankNum"),
   xpText:   document.getElementById("xpText"),
@@ -806,6 +843,9 @@ const el = {
   nextText: document.getElementById("nextText"),
   boostFill:document.getElementById("boostFill"),
   boostText:document.getElementById("boostText"),
+  danger:   document.getElementById("danger"),
+  dangerText:document.getElementById("dangerText"),
+  dangerWho:document.getElementById("dangerWho"),
   rungs:    document.getElementById("rungs"),
   sFood:    document.getElementById("sFood"),
   sKills:   document.getElementById("sKills"),
@@ -817,8 +857,7 @@ const el = {
   veil:     document.getElementById("deathVeil"),
   portrait: document.getElementById("portrait"),
   codex:    document.getElementById("codex"),
-  codexGrid:document.getElementById("codexGrid"),
-  mini:     document.getElementById("mini")
+  codexGrid:document.getElementById("codexGrid")
 };
 
 RANKS.forEach((r,i) => {
@@ -863,29 +902,21 @@ function toast(msg){ showBanner(msg, "", 1.1); }
 
 function updateHUD(){
   const r = RANKS[player.rank], max = RANKS.length-1;
+  const isMax = player.rank === max;
+  const shown = isMax ? RANKS[max].need : player.xp;
   drawPortrait(player.rank);
   el.rankName.textContent = r.name;
   el.rankName.style.color = r.color;
-  el.rankNum.textContent = "RANK " + (player.rank+1) + " / " + RANKS.length;
+  el.rankNum.textContent = (player.rank+1) + " / " + RANKS.length;
 
-  const isMax = player.rank === max;
-  const shown = isMax ? RANKS[max].need : player.xp;
-  el.xpText.innerHTML = "<b>" + shown.toFixed(1) + "</b> / " + r.need.toFixed(1) + " XP " +
-    (isMax ? '<span style="color:#ffd75e">&#9733; MAX RANK</span>'
-           : '<span style="color:#7e9cb5">&mdash; to ' + RANKS[player.rank+1].name + '</span>');
+  el.xpText.innerHTML = "<b>" + shown.toFixed(1) + "</b> / " + r.need + " XP";
   el.xpFill.style.width = clamp(shown / r.need * 100, 0, 100) + "%";
-
-  if (isMax){
-    el.nextText.innerHTML = "Peak of the food chain. Keep eating.";
-  } else {
-    const nxt = RANKS[player.rank+1];
-    el.nextText.innerHTML = "Evolve into <b style='color:#bfe3ff'>" + nxt.name + "</b> &middot; needs " +
-      nxt.need + " XP";
-  }
+  el.nextText.innerHTML = isMax
+    ? "Top of the food chain"
+    : 'Next: <b style="color:#bfe3ff">' + RANKS[player.rank+1].name + "</b>";
 
   el.boostFill.style.width = clamp(player.boost / BOOST_MAX * 100, 0, 100) + "%";
-  el.boostText.textContent = "BOOST " + player.boost.toFixed(1) + "s / " + BOOST_MAX.toFixed(1) +
-    "s ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â hold SPACE or CLICK";
+  el.boostText.innerHTML = "BOOST " + player.boost.toFixed(1) + "s &mdash; hold <b>SPACE</b> / <b>CLICK</b>";
   el.boostText.className = player.boost < 0.4 ? "hot" : "";
 
   el.sFood.textContent   = player.foodEaten;
@@ -893,9 +924,19 @@ function updateHUD(){
   el.sDeaths.textContent = player.deaths;
   el.sXp.textContent     = player.totalXp.toFixed(1);
 
+  // danger readout: a predator is either closing in or mid-lunge
+  const source = player.strikingBy || player.huntedBy;
+  const threat = !!source && !player.dead && player.invuln <= 0;
+  el.danger.classList.toggle("on", threat);
+  el.card.classList.toggle("danger", threat);
+  if (threat){
+    el.dangerText.innerHTML = player.strikingBy
+      ? "SWALLOWED BY <b>" + RANKS[source.rank].name + "</b> &mdash; BOOST NOW"
+      : "HUNTED BY <b>" + RANKS[source.rank].name + "</b> &mdash; BOOST TO FLEE";
+  }
+
   for (let i=0;i<rungEls.length;i++){
-    const c = rungEls[i];
-    c.className = "rung" + (i === player.rank ? " now" : (i < player.rank ? " done" : ""));
+    rungEls[i].className = "rung" + (i === player.rank ? " now" : (i < player.rank ? " done" : ""));
   }
 }
 
@@ -991,6 +1032,21 @@ function update(dt){
         if (o.rank < c.rank && d2 < preyD){ preyD = d2; prey = o; }
         else if (o.rank > c.rank && d2 < threatD){ threatD = d2; threat = o; }
       }
+      // The player lives outside critters, so they are considered separately --
+      // and far more carefully. Only creatures close in rank go looking for the
+      // player, and never while the spawn shield is up. Without this every
+      // larger creature in the world beelines for you and low ranks never get
+      // to move. Anything above you will still eat you on contact.
+      if (!player.dead && player.invuln <= 0){
+        const d2 = dist2(c.x, c.y, player.x, player.y);
+        if (c.rank > player.rank){
+          // only things close in rank go hunting for the player
+          if (c.rank - player.rank <= PLAYER_HUNT_GAP &&
+              d2 < preyD && d2 < PLAYER_PICKUP*PLAYER_PICKUP){ preyD = d2; prey = player; }
+        } else if (c.rank < player.rank && d2 < threatD){
+          threatD = d2; threat = player;          // big players still flush out prey
+        }
+      }
       if (prey && (!threat || preyD < threatD*1.4)){ c.state = "hunt"; c.target = prey; }
       else if (threat){ c.state = "flee"; c.target = threat; }
     }
@@ -1036,7 +1092,23 @@ function update(dt){
   for (let i=0;i<critters.length;i++){ const c = critters[i]; if (!c.dead) eatFood(c, dt, false); }
 
   /* ---- combat ---- */
-  resolveCombat();
+  resolveCombat(dt);
+
+  /* ---- who is currently hunting the player? ---- */
+  player.huntedBy = null;
+  player.strikingBy = null;
+  if (!player.dead){
+    let best = null, bestD = PLAYER_PICKUP*PLAYER_PICKUP;
+    for (let i=0;i<critters.length;i++){
+      const c = critters[i];
+      if (c.dead || c.rank <= player.rank) continue;
+      if (c.strikeT > 0){ player.strikingBy = c; continue; }
+      if (c.state !== "hunt" || c.target !== player) continue;
+      const d2 = dist2(c.x, c.y, player.x, player.y);
+      if (d2 < bestD){ bestD = d2; best = c; }
+    }
+    player.huntedBy = best;
+  }
 
   /* ---- effects ---- */
   for (let i=0;i<critters.length;i++){
@@ -1048,11 +1120,9 @@ function update(dt){
   if (!player.dead && player.burst > 0) player.burst -= dt*1.4;
   if (player.invuln > 0) player.invuln -= dt;
 
-  /* ---- camera ---- */
-  const tx = clamp(player.x - VW/2, 0, Math.max(0, WORLD.w - VW));
-  const ty = clamp(player.y - VH/2, 0, Math.max(0, WORLD.h - VH));
-  cam.x = lerp(cam.x, tx, clamp(9*dt, 0, 1));
-  cam.y = lerp(cam.y, ty, clamp(9*dt, 0, 1));
+  /* ---- camera: the player is always dead centre, no lerp, no clamping ---- */
+  cam.x = player.x - VW/2;
+  cam.y = player.y - VH/2;
 
   if (bannerT > 0){
     bannerT -= dt;
@@ -1074,7 +1144,10 @@ function moveEntity(e, dt){
 }
 
 function eatFood(e, dt, isPlayer){
-  const bite = e.r + e.r * 0.5;
+  // generous pickup radius -- chasing individual sprites pixel by pixel is not
+  // fun, and the food field has to be dense enough that a grazer keeps both
+  // evolving and topping up its boost meter
+  const bite = e.r * (isPlayer ? 2.2 : 1.6);
   for (let i=0;i<foods.length;i++){
     const f = foods[i];
     if (f.dead) continue;
@@ -1091,16 +1164,28 @@ function eatFood(e, dt, isPlayer){
   }
 }
 
-function resolveCombat(){
+function resolveCombat(dt){
   for (let i=0;i<critters.length;i++){
     const a = critters[i];
     if (a.dead) continue;
     // player vs NPC
     if (!player.dead){
       const rr = a.r + player.r;
-      if (dist2(a.x,a.y,player.x,player.y) < rr*rr){
-        if (a.rank < player.rank)               kill(player, a);
-        else if (a.rank > player.rank && player.invuln <= 0) kill(a, player);
+      const touching = dist2(a.x,a.y,player.x,player.y) < rr*rr;
+      if (a.rank < player.rank){
+        if (touching) kill(player, a);
+      } else if (a.rank > player.rank){
+        // A predator that is on top of you winds up first instead of killing
+        // outright. One-shotting the player on any graze is what made the world
+        // feel lethal; now there is always a visible half-second to boost away.
+        if (player.invuln > 0){ a.strikeT = 0; }
+        else if (touching){
+          if (a.strikeT <= 0){ a.strikeT = STRIKE_TIME; Sfx.strike(); }
+          a.strikeT -= dt;
+          if (a.strikeT <= 0) kill(a, player);
+        } else {
+          a.strikeT = 0;
+        }
       }
     }
     // NPC vs NPC
@@ -1167,15 +1252,27 @@ function respawnPlayer(){
   player.boost = Math.max(player.boost, BOOST_MAX * 0.6);
   player.vx = player.vy = 0;
   el.veil.classList.remove("on");
-  cam.x = clamp(x - VW/2, 0, Math.max(0, WORLD.w - VW));
-  cam.y = clamp(y - VH/2, 0, Math.max(0, WORLD.h - VH));
+  cam.x = x - VW/2; cam.y = y - VH/2;
   showBanner("BACK IN THE FOOD CHAIN", "Spawn shield up for " + SPAWN_SAFE.toFixed(1) + "s", 1.6);
+}
+
+/* A spot an NPC may reappear at. Critically this is never near the player --
+   otherwise creatures keep popping into existence on top of you. */
+function safeSpotForNpc(minDist){
+  for (let i = 0; i < 30; i++){
+    const x = rand(70, WORLD.w-70), y = rand(70, WORLD.h-70);
+    if (dist2(x, y, player.x, player.y) >= minDist*minDist) return { x:x, y:y };
+  }
+  // fallback: the world corner diagonally furthest from the player
+  const fx = player.x < WORLD.w/2 ? WORLD.w-90 : 90;
+  const fy = player.y < WORLD.h/2 ? WORLD.h-90 : 90;
+  return { x: fx, y: fy };
 }
 
 function reviveCritter(c){
   c.dead = false;
-  c.x = rand(70, WORLD.w-70);
-  c.y = rand(70, WORLD.h-70);
+  const s = safeSpotForNpc(NPC_SPAWN_SAFE);
+  c.x = s.x; c.y = s.y;
   c.vx = c.vy = 0;
   c.xp = 0;
   c.boost = BOOST_MAX;
@@ -1189,27 +1286,44 @@ function reviveCritter(c){
 function render(){
   ctx.clearRect(0,0,VW,VH);
 
-  // map backdrop
-  ctx.fillStyle = "#0a1826";
+  // the camera is not clamped to the world, so the view can run off the edge --
+  // paint "outside the map" first, then the map itself over the top of it
+  ctx.fillStyle = "#04080e";
   ctx.fillRect(0,0,VW,VH);
-  const gx = Math.floor(cam.x/100)*100, gy = Math.floor(cam.y/100)*100;
-  ctx.strokeStyle = "rgba(90,160,220,.055)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let x=gx; x < cam.x+VW+100; x+=100){ const sx = Math.round(x-cam.x)+.5; ctx.moveTo(sx,0); ctx.lineTo(sx,VH); }
-  for (let y=gy; y < cam.y+VH+100; y+=100){ const sy = Math.round(y-cam.y)+.5; ctx.moveTo(0,sy); ctx.lineTo(VW,sy); }
-  ctx.stroke();
+
+  const wx0 = Math.max(0, cam.x), wy0 = Math.max(0, cam.y);
+  const wx1 = Math.min(WORLD.w, cam.x + VW), wy1 = Math.min(WORLD.h, cam.y + VH);
+  if (wx1 > wx0 && wy1 > wy0){
+    ctx.fillStyle = "#0a1826";
+    ctx.fillRect(Math.round(wx0 - cam.x), Math.round(wy0 - cam.y),
+                 Math.round(wx1 - wx0), Math.round(wy1 - wy0));
+
+    // grid, only where the map actually is
+    const gx = Math.floor(wx0/100)*100, gy = Math.floor(wy0/100)*100;
+    ctx.strokeStyle = "rgba(90,160,220,.055)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x=gx; x <= wx1; x+=100){
+      const sx = Math.round(x-cam.x)+.5;
+      ctx.moveTo(sx, Math.round(wy0-cam.y)); ctx.lineTo(sx, Math.round(wy1-cam.y));
+    }
+    for (let y=gy; y <= wy1; y+=100){
+      const sy = Math.round(y-cam.y)+.5;
+      ctx.moveTo(Math.round(wx0-cam.x), sy); ctx.lineTo(Math.round(wx1-cam.x), sy);
+    }
+    ctx.stroke();
+  }
 
   // world border
-  ctx.strokeStyle = "rgba(90,209,255,.3)";
+  ctx.strokeStyle = "rgba(90,209,255,.35)";
   ctx.lineWidth = 3;
   ctx.strokeRect(1.5-cam.x, 1.5-cam.y, WORLD.w, WORLD.h);
 
   ctx.save();
   ctx.translate(-Math.round(cam.x), -Math.round(cam.y));
 
-  const pad = 90;
-  const view = { x0:cam.x-pad, y0:cam.y-pad, x1:cam.x+VW+pad, y1:cam.y+VH+pad };
+  // cull against the map itself, not the screen, so nothing leaks into the void
+  const view = { x0:wx0, y0:wy0, x1:wx1, y1:wy1 };
 
   // ---- food ----
   for (let i=0;i<foods.length;i++){
@@ -1232,7 +1346,6 @@ function render(){
   ctx.restore();
 
   drawCursor();
-  drawMinimap();
 }
 
 function drawCritter(e, view, isP){
@@ -1277,7 +1390,21 @@ function drawCritter(e, view, isP){
         ctx.lineWidth = 4;
         ctx.beginPath(); ctx.arc(e.x, e.y, rr + 6, 0, TAU); ctx.stroke();
       }
+      // being hunted: urgent red pulse, drawn last so it sits on top
+      if (e.huntedBy){
+        ctx.strokeStyle = "rgba(255,70,90," + (0.55 + 0.45*Math.sin(time*11)) + ")";
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(e.x, e.y, rr + 11 + Math.sin(time*11)*2, 0, TAU); ctx.stroke();
+      }
     }
+  }
+
+  // strike telegraph: a predator is mid-lunge on the player
+  if (e.strikeT > 0){
+    const k = 1 - e.strikeT/STRIKE_TIME;
+    ctx.strokeStyle = "rgba(255,60,80," + (0.45 + 0.55*k) + ")";
+    ctx.lineWidth = 2 + 3*k;
+    ctx.beginPath(); ctx.arc(e.x, e.y, sp.w*SCALE*0.42 + 16*(1-k) + 6, 0, TAU); ctx.stroke();
   }
 
   if (e.flash > 0) ctx.globalAlpha = clamp(e.flash*4, 0, 1);
@@ -1313,30 +1440,6 @@ function drawCursor(){
   ctx.moveTo(x,y+6);  ctx.lineTo(x,y+14);
   ctx.stroke();
   ctx.restore();
-}
-
-function drawMinimap(){
-  const g = el.mini.getContext("2d");
-  const mw = el.mini.width, mh = el.mini.height;
-  const sx = mw / WORLD.w, sy = mh / WORLD.h;
-  g.clearRect(0,0,mw,mh);
-  g.fillStyle = "rgba(20,50,80,.45)";
-  g.fillRect(0,0,mw,mh);
-  g.strokeStyle = "rgba(120,190,255,.25)";
-  g.strokeRect(.5,.5,mw-1,mh-1);
-
-  for (let i=0;i<critters.length;i++){
-    const c = critters[i];
-    if (c.dead) continue;
-    g.fillStyle = RANKS[c.rank].color;
-    g.globalAlpha = 0.75;
-    g.fillRect(c.x*sx-1, c.y*sy-1, 2, 2);
-  }
-  g.globalAlpha = 1;
-  g.fillStyle = "#fff";
-  g.fillRect(player.x*sx-2, player.y*sy-2, 4, 4);
-  const vw = VW*sx, vh = VH*sy;
-  g.strokeRect(clamp(cam.x*sx,0,mw), clamp(cam.y*sy,0,mh), Math.min(vw,mw), Math.min(vh,mh));
 }
 
 /* ============================================================
@@ -1383,7 +1486,12 @@ cv.addEventListener("pointerdown", () => { if (!running) startGame(); });
 window.EvoQuest = {
   RANKS: RANKS, BOOST_MAX: BOOST_MAX, FOOD_XP: FOOD_XP,
   KILL_XP_SHARE: KILL_XP_SHARE, DEATH_XP_KEEP: DEATH_XP_KEEP,
+  BOOST_MULT: BOOST_MULT, NPC_SPAWN_SAFE: NPC_SPAWN_SAFE,
+  PLAYER_PICKUP: PLAYER_PICKUP, PLAYER_HUNT_GAP: PLAYER_HUNT_GAP,
+  SPAWN_SAFE: SPAWN_SAFE,
+  world: WORLD,
   get player(){ return player; },
+  get cam(){ return cam; },
   get critters(){ return critters; },
   get foods(){ return foods; },
   get sprites(){ return SPRITES; },

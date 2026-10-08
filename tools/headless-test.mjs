@@ -12,6 +12,7 @@ import { boot } from "./harness.mjs";
 
 const ctx = boot();
 const G = ctx.G;
+const WORLD = { w: G.world.w, h: G.world.h };
 
 // ------------------------------------------------------------------- helpers
 let pass = 0, fail = 0;
@@ -26,6 +27,9 @@ function clearField() {
   for (const f of G.foods) { f.dead = true; f.respawn = 9999; }
   for (const c of G.critters) { c.dead = true; c.deadT = 9999; }
 }
+/** Empty the NPC list outright, so a sub-test's creature cannot be shadowed. */
+function clearNPCs() { G.critters.length = 0; }
+
 function resetPlayer() {
   const p = G.player;
   p.rank = 0; p.xp = 0; p.totalXp = 0; p.kills = 0; p.deaths = 0; p.foodEaten = 0;
@@ -44,7 +48,8 @@ function spawnNpc(rank, dx, dy) {
   const p = G.player;
   const c = {
     isPlayer: false, rank, xp: 0, x: p.x + dx, y: p.y + dy, vx: 0, vy: 0,
-    r: 20, face: 1, wobble: 0, boost: 5, boosting: false, burst: 0, flash: 0,
+    r: 20, face: 1, wobble: 0, boost: 5, boosting: false, invuln: 0,
+    huntedBy: null, strikeT: 0, burst: 0, flash: 0,
     dead: false, deadT: 0, state: "wander", target: null, think: 99,
     wanderAng: 0, wanderT: 99, totalXp: 0, kills: 0, deaths: 0, foodEaten: 0,
     bestRank: rank, label: "npc"
@@ -137,21 +142,35 @@ console.log("\nhunting lower ranks");
 
 console.log("\nbeing eaten");
 {
-  clearField(); resetPlayer();
+  clearField(); clearNPCs(); resetPlayer();
   G.player.rank = 1;                                   // Fish
   G.player.xp = 6.0;
   const killer = spawnNpc(5, 1, 0);                   // Sparrow
   step(2);
+  ok("a predator on top of you winds up first, it does not instantly kill",
+     !G.player.dead && killer.strikeT > 0, `strikeT=${Number(killer.strikeT).toFixed(2)}`);
+  step(45);                                            // let the telegraph elapse
   ok("higher rank eats the player", G.player.deaths === 1, G.player.deaths);
   ok("player is dead", G.player.dead === true);
   ok("player keeps 50% of XP (3.0)", near(G.player.xp, 3.0), G.player.xp);
   ok("killer gains 25% of the player's XP", near(killer.xp, 1.5), killer.xp);
 }
 {
-  clearField(); resetPlayer();
+  // escaping during the windup must actually work
+  clearField(); clearNPCs(); resetPlayer();
+  G.player.rank = 1; G.player.xp = 6.0;
+  const killer = spawnNpc(5, 1, 0);
+  step(4);
+  killer.x = G.player.x + 900; killer.y = G.player.y;   // player "boosts away"
+  step(45);
+  ok("breaking away during the windup cancels the kill", !G.player.dead && G.player.deaths === 0,
+     `strikeT=${Number(killer.strikeT).toFixed(2)}`);
+}
+{
+  clearField(); clearNPCs(); resetPlayer();
   G.player.rank = 1; G.player.xp = 6.0;
   spawnNpc(8, 1, 0);                                   // Owl
-  step(2);
+  step(45);
   ok("death does not drop the player below rank 1", G.player.rank === 1, G.player.rank);
   step(60 * 3);                                        // wait out the respawn timer
   ok("player respawns automatically", G.player.dead === false);
@@ -208,15 +227,226 @@ console.log("\nmovement");
 
 console.log("\nspawn shield");
 {
-  clearField(); resetPlayer();
+  clearField(); clearNPCs(); resetPlayer();
   G.player.rank = 1; G.player.xp = 6.0;
   G.player.invuln = 2.0;
   const killer = spawnNpc(8, 1, 0);
   step(30);
   ok("spawn shield blocks being eaten", G.player.dead === false && G.player.deaths === 0);
   G.player.invuln = 0;
-  step(2);
+  step(45);
   ok("shield wears off and the kill lands", G.player.dead === true, `invuln gone, dead=${G.player.dead}`);
+}
+
+console.log("\ncamera stays centred on the player");
+{
+  clearField(); clearNPCs(); resetPlayer();
+  G.input.down = false;
+  let worstX = 0, worstY = 0;
+  for (let i = 0; i < 600; i++) {
+    G.input.mx = 100 + (i * 37) % (ctx.width - 200);
+    G.input.my = 100 + (i * 53) % (ctx.height - 200);
+    step(1);
+    worstX = Math.max(worstX, Math.abs(G.cam.x - (G.player.x - ctx.width / 2)));
+    worstY = Math.max(worstY, Math.abs(G.cam.y - (G.player.y - ctx.height / 2)));
+  }
+  ok("camera x is exactly player.x - width/2", worstX < 1e-9, `worst ${worstX}`);
+  ok("camera y is exactly player.y - height/2", worstY < 1e-9, `worst ${worstY}`);
+
+  G.player.x = 40; G.player.y = 40; step(1);
+  ok("camera is not clamped at the world corner",
+     Math.abs(G.cam.x - (G.player.x - ctx.width / 2)) < 1e-9 && G.cam.x < 0,
+     `cam.x=${G.cam.x}`);
+}
+
+console.log("\ncreatures never reappear on top of the player");
+{
+  clearField(); clearNPCs(); resetPlayer();
+  G.player.x = WORLD.w / 2; G.player.y = WORLD.h / 2;
+  let worst = Infinity;
+  for (let i = 0; i < 400; i++) {
+    const c = spawnNpc(5, 0, 0);
+    c.dead = true; c.deadT = 0;
+    step(1);
+    worst = Math.min(worst, Math.hypot(c.x - G.player.x, c.y - G.player.y));
+  }
+  ok("revived NPCs are always at least the safe distance away",
+     worst >= G.NPC_SPAWN_SAFE - 1,
+     `closest respawn ${worst.toFixed(0)}px (min ${G.NPC_SPAWN_SAFE})`);
+}
+
+console.log("\nthe player is never hopelessly outrun");
+{
+  // For every rank, boosting must beat the fastest creature allowed to hunt it.
+  let allEscapable = true;
+  const report = [];
+  for (let r = 0; r < 10; r++) {
+    const boosted = G.RANKS[r].speed * G.BOOST_MULT;
+    let fastestHunter = 0;
+    for (let h = r + 1; h < 10; h++) {
+      if (h - r <= G.PLAYER_HUNT_GAP) fastestHunter = Math.max(fastestHunter, G.RANKS[h].speed);
+    }
+    if (!(fastestHunter === 0 || boosted > fastestHunter)) allEscapable = false;
+    report.push(`${G.RANKS[r].name}:${boosted.toFixed(0)}/${fastestHunter || "-"}`);
+  }
+  ok("boosting outruns every rank that is allowed to hunt you", allEscapable, report.join(" "));
+}
+
+console.log("\nonly close ranks hunt the player");
+{
+  clearField(); clearNPCs(); resetPlayer();
+  G.player.rank = 0; G.player.invuln = 0;
+  const farAbove = spawnNpc(9, 120, 0);            // Vampire, 9 ranks up
+  farAbove.state = "wander"; farAbove.think = 0;
+  step(2);
+  ok("a Vampire will not chase a Plankton", farAbove.target !== G.player,
+     `target rank=${farAbove.target && farAbove.target.rank}`);
+}
+{
+  clearField(); clearNPCs(); resetPlayer();
+  G.player.rank = 0; G.player.invuln = 0;
+  const close = spawnNpc(1, 120, 0);               // Fish, 1 rank up
+  close.state = "wander"; close.think = 0;
+  step(2);
+  ok("a Fish will chase a Plankton", close.target === G.player,
+     `target rank=${close.target && close.target.rank}`);
+}
+{
+  clearField(); clearNPCs(); resetPlayer();
+  G.player.invuln = 3;
+  const hunter = spawnNpc(1, 120, 0);
+  hunter.state = "wander"; hunter.think = 0;
+  step(2);
+  ok("the spawn shield stops anything from hunting you", hunter.target !== G.player);
+}
+{
+  clearField(); clearNPCs(); resetPlayer();
+  G.player.rank = 0; G.player.invuln = 0;
+  const distant = spawnNpc(1, G.PLAYER_PICKUP + 120, 0);
+  distant.state = "wander"; distant.think = 0;
+  step(2);
+  ok("creatures ignore the player beyond the pickup radius", distant.target !== G.player);
+}
+{
+  clearField(); clearNPCs(); resetPlayer();
+  G.player.rank = 0; G.player.invuln = 0;
+  const hunter = spawnNpc(1, 120, 0);
+  hunter.state = "wander"; hunter.think = 0;
+  step(3);
+  ok("huntedBy is reported so the HUD can warn you", G.player.huntedBy === hunter,
+     `huntedBy=${G.player.huntedBy && G.player.huntedBy.rank}`);
+}
+
+console.log("\ncan a player who uses the escape mechanic survive?");
+{
+  // Several independent 3-minute runs each. A competent player boosts and backs
+  // off when the HUD warns them -- this is the loop the danger banner is for.
+  function run(smart) {
+    G.restart();
+    let deaths = 0, unannounced = 0;
+    const dt = 1 / 60;
+    for (let i = 0; i < 60 * 180; i++) {
+      const p = G.player;
+      const threat = p.huntedBy || p.strikingBy;
+      if (smart && threat && !p.dead) {
+        // break contact, but do not sprint in a straight line across the map --
+        // that just walks into the next predator
+        const dx = p.x - threat.x, dy = p.y - threat.y;
+        const d = Math.hypot(dx, dy) || 1;
+        G.input.mx = p.x + (dx / d) * 260 - G.cam.x;
+        G.input.my = p.y + (dy / d) * 260 - G.cam.y;
+        G.input.down = p.boost > 0.2;
+      } else {
+        const a = i * 0.017;
+        G.input.mx = 640 + Math.cos(a) * 520;
+        G.input.my = 400 + Math.sin(a * 1.7) * 340;
+        G.input.down = (i % 90) > 55;
+      }
+      const before = p.deaths;
+      G.step(dt);
+      if (p.deaths > before) {
+        deaths++;
+        if (!threat) unannounced++;     // died with no warning at all -- must never happen
+      }
+    }
+    return { deaths, unannounced, rank: G.player.rank, food: G.player.foodEaten };
+  }
+
+  const TRIALS = 6;
+  // median, not mean -- one unlucky run should not decide the verdict
+  const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+  const average = (smart) => {
+    const rs = [];
+    for (let i = 0; i < TRIALS; i++) rs.push(run(smart));
+    return {
+      deaths: median(rs.map(r => r.deaths)),
+      mean:   rs.reduce((s, r) => s + r.deaths, 0) / TRIALS,
+      unannounced: rs.reduce((s, r) => s + r.unannounced, 0),
+      rank:   rs.reduce((s, r) => s + r.rank, 0) / TRIALS,
+      food:   rs.reduce((s, r) => s + r.food, 0) / TRIALS
+    };
+  };
+  const careless = average(false), careful = average(true);
+  console.log(`        careless: ${careless.mean.toFixed(2)} deaths/run (median ${careless.deaths}), rank ${(careless.rank+1).toFixed(1)}, ${careless.food.toFixed(0)} food`);
+  console.log(`        careful:  ${careful.mean.toFixed(2)} deaths/run (median ${careful.deaths}), rank ${(careful.rank+1).toFixed(1)}, ${careful.food.toFixed(0)} food`);
+
+  ok("no death ever happens without a warning first (the core anti-frustration rule)",
+     careless.unannounced === 0 && careful.unannounced === 0,
+     `${careless.unannounced + careful.unannounced} unannounced deaths`);
+  ok("reacting to the danger warning cuts deaths sharply",
+     careful.deaths < careless.deaths,
+     `median ${careless.deaths} -> ${careful.deaths}`);
+  ok("a player who reacts typically survives most of a 3-minute run",
+     careful.deaths <= 2, `median ${careful.deaths}`);
+  ok("survival still depends on playing well",
+     careless.deaths > careful.deaths, "the escape tools have to be used");
+  ok("playing well gets you further up the ladder",
+     careful.rank > careless.rank,
+     `${(careless.rank+1).toFixed(1)} -> ${(careful.rank+1).toFixed(1)}`);
+}
+
+console.log("\nthe food economy actually feeds you");
+{
+  // Death halves XP, so a dying player's rank is dominated by deaths rather than
+  // by foraging. Keep the shield up to isolate the food economy, and play like a
+  // person: head for the nearest piece of food and boost when it is far off.
+  const dt = 1 / 60;
+  function nearestFood(p) {
+    let best = null, bestD = Infinity;
+    for (const f of G.foods) {
+      if (f.dead) continue;
+      const d = (f.x - p.x) ** 2 + (f.y - p.y) ** 2;
+      if (d < bestD) { bestD = d; best = f; }
+    }
+    return best ? { f: best, d: Math.sqrt(bestD) } : null;
+  }
+
+  const RUNS = 4, LIMIT = 240;
+  let reached = 0, secondsTotal = 0;
+  for (let k = 0; k < RUNS; k++) {
+    G.restart();
+    let took = LIMIT;
+    for (let i = 0; i < 60 * LIMIT && G.player.rank === 0; i++) {
+      G.player.invuln = 99;                 // isolate foraging from being hunted
+      const p = G.player;
+      const tgt = nearestFood(p);
+      if (tgt) {
+        G.input.mx = tgt.f.x - G.cam.x;
+        G.input.my = tgt.f.y - G.cam.y;
+        G.input.down = p.boost > 0.3 && tgt.d > 160;   // boost over open ground
+      }
+      G.step(dt);
+      if (G.player.rank > 0) took = i / 60;
+    }
+    if (G.player.rank > 0) reached++;
+    secondsTotal += took;
+  }
+  const avgSeconds = secondsTotal / RUNS;
+  console.log(`        food-seeking: ${reached}/${RUNS} runs reached Fish, ${avgSeconds.toFixed(0)}s on average`);
+  ok("a player who heads for food reaches Fish, every run",
+     reached === RUNS, `${reached}/${RUNS} runs`);
+  ok("reaching the first evolution is brisk (under 90s of active foraging)",
+     reached === RUNS && avgSeconds < 90, `${avgSeconds.toFixed(0)}s`);
 }
 
 console.log("\nsoak: 3 minutes of simulated play");
@@ -240,7 +470,9 @@ console.log("\nsoak: 3 minutes of simulated play");
   const p = G.player;
   const finite = (v) => typeof v === "number" && isFinite(v);
   ok("player position is finite", finite(p.x) && finite(p.y), `${p.x},${p.y}`);
-  ok("player stays inside the world", p.x >= 0 && p.x <= 3000 && p.y >= 0 && p.y <= 2100, `${p.x.toFixed(0)},${p.y.toFixed(0)}`);
+  ok("player stays inside the world",
+     p.x >= 0 && p.x <= WORLD.w && p.y >= 0 && p.y <= WORLD.h,
+     `${p.x.toFixed(0)},${p.y.toFixed(0)} of ${WORLD.w}x${WORLD.h}`);
   ok("player rank is valid", p.rank >= 0 && p.rank <= 9, p.rank);
   ok("player XP is finite and bounded", finite(p.xp) && p.xp <= G.RANKS[p.rank].need, p.xp);
   ok("boost meter stays within 0..5", p.boost >= 0 && p.boost <= G.BOOST_MAX, p.boost);

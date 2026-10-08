@@ -36,10 +36,25 @@ needed.
 |---|---|
 | Move the mouse | Your creature walks toward the cursor |
 | **Hold left mouse** or **hold Spacebar** | Speed boost (drains the boost meter) |
-| `C` | Bestiary — every sprite in the game |
+| `C` | Guide — rank ladder plus every sprite in the game |
 | `M` | Mute / unmute |
 | `R` | Restart as Plankton |
-| `Esc` | Pause |
+| `Esc` | Pause (closes the guide first if it is open) |
+
+## The view
+
+Your creature is **always dead centre** of the screen and the camera never drifts
+or clamps, so you always know exactly where you are. There is no minimap and no
+permanent rank ladder — the only things on screen are your rank card, a single
+one-line tally, and the guide on `C`. Anything outside the world is drawn as dark
+void beyond the map border.
+
+If something is coming for you, the game tells you rather than killing you
+without warning:
+
+- a **red banner** and a red border on your card name the creature hunting you
+- a **red ring pulses** around any predator that is mid-lunge on you
+- a **white halo** means your spawn shield is still up
 
 ---
 
@@ -68,12 +83,41 @@ instant death for the loser — there is no health bar.
 **Killing** a creature transfers **25% of its XP** to you, plus a chunk of boost.
 
 **Dying** costs you nothing but XP: you respawn after ~2.4s keeping **50% of the
-XP you had**, at a spot far from anything bigger, with a **2.6s spawn shield**
+XP you had**, at a spot far from anything bigger, with a **5s spawn shield**
 so you can't be insta-killed on arrival.
 
 **Boost.** The meter holds at most **5 seconds**. Holding the button spends it
-at 1× speed ×1.95. It only comes back by eating — 0.45s per piece of forage,
+at 1x speed x2.5. It only comes back by eating - 1.2s per piece of forage,
 1.75s per kill.
+
+## Staying alive
+
+A naive build of this is miserable: contact is instant death, so a bigger
+creature wandering into you ends the run with no chance to react, and if every
+predator beelines for you then a low rank never gets anywhere. Four rules fix
+that without weakening the food chain:
+
+1. **Predators wind up first.** Anything above your rank that is touching you
+   takes 0.6s to actually swallow you, with a red ring closing in. Break contact
+   or boost during that window and it never lands.
+2. **Only close ranks come looking.** A creature more than 2 ranks above you will
+   never hunt you down - it still eats you on contact, it just won't cross the
+   map for you. Anything within 300px is fair game.
+3. **Nobody spawns on you.** Respawned creatures always appear at least 900px
+   away, and you respawn at least 700px from anything bigger.
+4. **Boost always outruns your hunters.** At every rank, boosted speed beats the
+   fastest creature allowed to hunt you (there is a test asserting exactly this
+   for all ten ranks).
+
+Measured over 3-minute simulated runs, 4 trials each:
+
+| | deaths per run | rank reached |
+|---|---|---|
+| wanders, boosts on a timer | ~2.8 | ~1.5 |
+| reacts to the warning | ~0.5 | ~2.8 |
+
+`node tools\death-diagnostic.mjs` reproduces those numbers, including how much of
+each run is spent with an empty boost meter.
 
 ---
 
@@ -127,13 +171,16 @@ Everything in `tools/` is a development aid and is **not** needed to play or
 deploy the game. None of it ships inside `index.html`.
 
 ```powershell
-# 58 assertions covering the rules, plus a 3-minute simulation soak test
+# 76 assertions covering the rules, plus balance simulations
 node tools\headless-test.mjs
+
+# measure deaths-per-run and progression with and without reacting to warnings
+node tools\death-diagnostic.mjs
 
 # render real game frames to PNG (a small software canvas + PNG encoder)
 node tools\snapshot.mjs
 
-# render the in-game bestiary panel to PNG
+# render the in-game guide panel to PNG
 node tools\codex-shot.mjs
 
 # sprite data validation and contact-sheet rendering
@@ -162,14 +209,16 @@ tools/
   render-sprites.ps1    sprite contact sheet -> PNG
   sprite-widths.ps1     per-row width audit
   harness.mjs           DOM stub + software canvas + PNG encoder
-  headless-test.mjs     rule + soak tests
+  headless-test.mjs     rule, AI and balance tests
+  death-diagnostic.mjs  deaths/progression measurement over many runs
   snapshot.mjs          render game frames to PNG
-  codex-shot.mjs        render the bestiary panel to PNG
+  codex-shot.mjs        render the guide panel to PNG
 ```
 
 ## Tuning
 
 Every gameplay constant sits in one block at the top of the game script in
 `index.html` — world size, population, forage count, sprite zoom, boost
-duration and multiplier, XP values, kill/death percentages, respawn timing —
-followed by the `RANKS` table. Change a number, reload, done.
+duration and multiplier, XP values, kill/death percentages, respawn timing, the
+strike windup, and how far above you a creature has to be before it starts
+hunting you — followed by the `RANKS` table. Change a number, reload, done.
