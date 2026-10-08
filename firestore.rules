@@ -32,17 +32,24 @@ service cloud.firestore {
       ]);
     }
 
+    // Security Rules have no loops, so every field is checked explicitly.
+    // && and || short-circuit, so a type check always guards the comparison
+    // that follows it.
     function saneNumbers() {
       let d = request.resource.data;
-      let ints = ['v','rank','bestRank','kills','deaths','food','playSec'];
-      for (let f in ints) {
-        if (!(d[f] is int) || d[f] < 0) { return false; }
-      }
-      // rank must be a real rank index, never a wild value
-      if (d.rank > 9 || d.bestRank > 9) { return false; }
-      if (!(d.xp is number) || d.xp < 0 || d.xp > 1000) { return false; }
-      if (!(d.totalXp is number) || d.totalXp < 0 || d.totalXp > 10000000) { return false; }
-      if (!(d.name is string) || d.name.size() > 20) { return false; }
+      if (!(d.v        is int)    || d.v        < 0) { return false; }
+      if (!(d.rank     is int)    || d.rank     < 0 || d.rank     > 9) { return false; }
+      if (!(d.bestRank is int)    || d.bestRank < 0 || d.bestRank > 9) { return false; }
+      if (!(d.kills    is int)    || d.kills    < 0) { return false; }
+      if (!(d.deaths   is int)    || d.deaths   < 0) { return false; }
+      if (!(d.food     is int)    || d.food     < 0) { return false; }
+      if (!(d.playSec  is int)    || d.playSec  < 0) { return false; }
+      if (!(d.updatedAt is int)   || d.updatedAt < 0) { return false; }
+      // xp and totalXp stay fractional on purpose: forage is worth 0.2 and a
+      // kill pays 30% of a lifetime total
+      if (!(d.xp      is number)  || d.xp      < 0 || d.xp      > 100000)  { return false; }
+      if (!(d.totalXp is number)  || d.totalXp < 0 || d.totalXp > 10000000) { return false; }
+      if (!(d.name    is string)  || d.name.size() > 20) { return false; }
       if (!(d.bestTimes is map)) { return false; }
       return true;
     }
