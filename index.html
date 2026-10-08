@@ -151,6 +151,34 @@
   #netStatus{font-size:9.5px;color:var(--dim);min-height:13px;line-height:1.35;}
   #netPeers{font-size:9.5px;color:var(--dim);margin-top:4px;line-height:1.5;}
   #netPeers b{color:#bfe3ff;}
+
+  /* ---------- account ---------- */
+  #acctBtn{width:100%;margin-top:8px;}
+  #acctModal{position:fixed;inset:0;z-index:8;display:none;align-items:center;justify-content:center;
+    background:rgba(3,8,14,.8);}
+  #acctModal.on{display:flex;}
+  #acctBox{width:340px;max-width:92%;padding:18px 20px;}
+  #acctBox h3{margin:0 0 3px;font-size:15px;}
+  #acctBox .sub{margin:0 0 14px;font-size:10.5px;color:var(--dim);line-height:1.5;}
+  #acctBox label{display:block;font-size:9.5px;letter-spacing:1px;color:var(--dim);margin:10px 0 4px;}
+  #acctBox input[type=text],#acctBox input[type=email],#acctBox input[type=password]{
+    pointer-events:auto;width:100%;box-sizing:border-box;font:inherit;font-size:12px;padding:7px 9px;
+    border-radius:6px;color:var(--ink);background:rgba(0,0,0,.45);border:1px solid var(--line);}
+  #acctBox input:focus{outline:none;border-color:rgba(90,209,255,.65);}
+  #acctErr{color:#ff9aa8;font-size:10.5px;margin-top:10px;min-height:14px;line-height:1.4;}
+  #acctNote{color:var(--dim);font-size:10px;margin-top:12px;line-height:1.5;}
+  .abtn{pointer-events:auto;cursor:pointer;font:inherit;font-size:12px;font-weight:600;padding:9px 12px;
+    border-radius:7px;border:1px solid var(--line);color:var(--ink);background:rgba(90,209,255,.16);width:100%;
+    margin-top:8px;}
+  .abtn:hover{background:rgba(90,209,255,.3);}
+  .abtn.ghost{background:transparent;color:var(--dim);}
+  .abtn.danger{background:rgba(255,90,110,.14);border-color:rgba(255,90,110,.35);color:#ffd2d8;}
+  .abtn:disabled{opacity:.5;cursor:default;}
+  #acctWho{font-size:12px;line-height:1.7;}
+  #acctWho b{color:#eaf7ff;}
+  #acctWho .muted{color:var(--dim);}
+  .arow{display:flex;gap:8px;}
+  .arow .abtn{margin-top:8px;}
 </style>
 </head>
 <body>
@@ -168,6 +196,36 @@
     <button class="lbtn warn" id="btnLeave" style="width:100%;display:none">Leave</button>
     <div id="netStatus"></div>
     <div id="netPeers"></div>
+    <button class="lbtn" id="acctBtn">Account</button>
+  </div>
+
+  <div id="acctModal">
+    <div id="acctBox" class="panel">
+      <h3>Your profile</h3>
+      <p class="sub">Progress is always saved on this device. An account just
+         carries it to your other devices.</p>
+      <div id="acctSignedOut">
+        <label>DISPLAY NAME</label>
+        <input type="text" id="anName" maxlength="20" placeholder="Player">
+        <label>EMAIL</label>
+        <input type="email" id="anEmail" placeholder="you@example.com" autocomplete="email">
+        <label>PASSWORD</label>
+        <input type="password" id="anPass" placeholder="at least 6 characters" autocomplete="new-password">
+        <div class="arow">
+          <button class="abtn" id="anCreate">Create account</button>
+          <button class="abtn" id="anSignIn">Sign in</button>
+        </div>
+        <button class="abtn ghost" id="anGoogle">Continue with Google</button>
+        <button class="abtn ghost" id="anSkip">Keep playing offline</button>
+      </div>
+      <div id="acctSignedIn" style="display:none">
+        <div id="acctWho"></div>
+        <button class="abtn danger" id="anOut">Sign out</button>
+        <button class="abtn ghost" id="anUpgrade">Add email to this session</button>
+      </div>
+      <div id="acctErr"></div>
+      <div id="acctNote"></div>
+    </div>
   </div>
 
   <div id="card" class="panel">
@@ -698,6 +756,311 @@ const Sfx = {
 };
 
 /* ============================================================
+   ACCOUNTS
+   ------------------------------------------------------------
+   Progress ALWAYS saves locally, with no account and no network.
+   An account is an optional extra that carries that progress
+   between devices.
+
+   Fill in the block below (Firebase console -> Project settings ->
+   Your apps -> SDK setup and configuration) to switch it on. While
+   it is empty the game behaves exactly as before.
+   ============================================================ */
+const FB_CONFIG = {
+  apiKey: "",            // <- paste your Firebase config here
+  authDomain: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
+};
+const FB_SDK = "https://www.gstatic.com/firebasejs/10.12.5";
+
+const Accounts = {
+  ready: false,          // SDK loaded
+  configured: !!(FB_CONFIG.apiKey && FB_CONFIG.projectId && FB_CONFIG.appId),
+  fb: null,              // { app, auth, db }
+  user: null,            // firebase user or null
+  cloud: null,           // last known cloud profile
+  syncing: false,
+  lastError: "",
+  loading: false,
+  sdkPromise: null,
+
+  KEY: "evoquest.profile.v1",
+
+  /* ---------- local profile (always on) ---------- */
+  blank(){
+    return {
+      v: 1,
+      name: "Player",
+      rank: 0,
+      xp: 0,
+      totalXp: 0,
+      bestRank: 0,
+      kills: 0,
+      deaths: 0,
+      food: 0,
+      playSec: 0,
+      bestTimes: {},      // rank index -> seconds taken to first reach it
+      updatedAt: 0
+    };
+  },
+
+  /* localStorage is entirely under the player's control, so nothing read back
+     from it can be trusted: coerce every field and clamp it into range. */
+  sanitize(o){
+    const b = this.blank();
+    if (!o || typeof o !== "object") return b;
+    const num = (v, lo, hi, dflt) => {
+      const n = typeof v === "number" ? v : parseFloat(v);
+      if (!isFinite(n)) return dflt;
+      return clamp(n, lo, hi);
+    };
+    const int = (v, lo, hi, dflt) => Math.floor(num(v, lo, hi, dflt));
+    b.v      = 1;
+    b.name   = typeof o.name === "string" && o.name.trim() ? o.name.trim().slice(0, 20) : b.name;
+    b.rank   = int(o.rank, 0, RANKS.length - 1, 0);
+    b.xp     = num(o.xp, 0, 100000, 0);            // fractional: 0.2 per forage
+    b.totalXp= num(o.totalXp, 0, 1e9, 0);          // fractional
+    b.bestRank = int(o.bestRank, 0, RANKS.length - 1, 0);
+    b.kills  = int(o.kills, 0, 1e9, 0);
+    b.deaths = int(o.deaths, 0, 1e9, 0);
+    b.food   = int(o.food, 0, 1e9, 0);
+    b.playSec= int(o.playSec, 0, 1e12, 0);
+    b.updatedAt = int(o.updatedAt, 0, 1e15, 0);
+    b.bestTimes = {};
+    if (o.bestTimes && typeof o.bestTimes === "object"){
+      for (const k of Object.keys(o.bestTimes).slice(0, 20)){
+        const i = parseInt(k, 10);
+        if (!isFinite(i) || i < 0 || i >= RANKS.length) continue;
+        const t = num(o.bestTimes[k], 0, 1e12, -1);
+        if (t >= 0) b.bestTimes[i] = t;
+      }
+    }
+    return b;
+  },
+
+  local(){
+    try {
+      const raw = localStorage.getItem(this.KEY);
+      if (!raw) return this.blank();
+      return this.sanitize(JSON.parse(raw));
+    } catch (e) { return this.blank(); }
+  },
+  saveLocal(p){
+    p.updatedAt = Date.now();
+    try { localStorage.setItem(this.KEY, JSON.stringify(p)); } catch (e) {}
+  },
+
+  /* Progress score: how far along the ladder this profile is, used to decide
+     which side wins a merge. Sums the XP needed to reach the current rank and
+     adds the progress already banked toward the next one. */
+  score(p){
+    let s = p.xp || 0;
+    for (let i = 0; i < (p.rank || 0); i++) s += RANKS[i].need;
+    return s;
+  },
+
+  /* Merge two profiles. Progression comes from whichever is further along;
+     counters take the larger value so replaying a session on a second device
+     cannot inflate them. Never sums -- merging twice must be idempotent. */
+  merge(a, b){
+    a = this.sanitize(a);
+    b = this.sanitize(b);
+    if (!a) return b;
+    const win = this.score(a) >= this.score(b) ? a : b;
+    const lose = win === a ? b : a;
+    const bestTimes = Object.assign({}, a.bestTimes || {});
+    for (const k in (b.bestTimes || {})){
+      if (bestTimes[k] === undefined || (b.bestTimes[k] || 0) < bestTimes[k]) bestTimes[k] = b.bestTimes[k];
+    }
+    return {
+      v: 1,
+      name: win.name || lose.name || "Player",
+      rank: win.rank, xp: win.xp, totalXp: Math.max(a.totalXp || 0, b.totalXp || 0),
+      bestRank: Math.max(a.bestRank || 0, b.bestRank || 0),
+      kills: Math.max(a.kills || 0, b.kills || 0),
+      deaths: Math.max(a.deaths || 0, b.deaths || 0),
+      food: Math.max(a.food || 0, b.food || 0),
+      playSec: Math.max(a.playSec || 0, b.playSec || 0),
+      bestTimes,
+      updatedAt: Date.now()
+    };
+  },
+
+  /* ---------- lazy SDK ---------- */
+  load(){
+    if (this.fb) return Promise.resolve(this.fb);
+    if (this.sdkPromise) return this.sdkPromise;
+    this.sdkPromise = new Promise((res, rej) => {
+      const need = ["firebase-app-compat.js", "firebase-auth-compat.js", "firebase-firestore-compat.js"];
+      let left = need.length;
+      const onErr = () => rej(new Error("could not load the Firebase SDK (no network?)"));
+      need.forEach(f => {
+        const s = document.createElement("script");
+        s.src = FB_SDK + "/" + f;
+        s.onload = () => { if (--left === 0) res(); };
+        s.onerror = onErr;
+        document.head.appendChild(s);
+      });
+    }).then(() => {
+      if (!window.firebase) throw new Error("Firebase SDK did not initialise");
+      const app = window.firebase.initializeApp(FB_CONFIG);
+      this.fb = { app, auth: window.firebase.auth(), db: window.firebase.firestore() };
+      this.ready = true;
+      return this.fb;
+    });
+    return this.sdkPromise;
+  },
+
+  /* ---------- auth ---------- */
+  async signUp(email, pass, name){
+    const { auth } = await this.load();
+    const cred = await auth.createUserWithEmailAndPassword(email, pass);
+    if (name) await cred.user.updateProfile({ displayName: name });
+    this.user = cred.user;
+    await this.pull();
+    return this.user;
+  },
+  async signIn(email, pass){
+    const { auth } = await this.load();
+    const cred = await auth.signInWithEmailAndPassword(email, pass);
+    this.user = cred.user;
+    await this.pull();
+    return this.user;
+  },
+  async signInGoogle(){
+    const { auth } = await this.load();
+    const provider = new window.firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    const cred = await auth.signInWithPopup(provider);
+    this.user = cred.user;
+    await this.pull();
+    return this.user;
+  },
+  async signInAnon(){
+    const { auth } = await this.load();
+    const cred = await auth.signInAnonymously();
+    this.user = cred.user;
+    await this.pull();
+    return this.user;
+  },
+  /* promote an anonymous session into a real account without losing progress */
+  async upgrade(email, pass){
+    if (!this.user || !this.user.isAnonymous) throw new Error("not on an anonymous session");
+    const cred = window.firebase.auth.EmailAuthProvider.credential(email, pass);
+    const res = await this.user.linkWithCredential(cred);
+    this.user = res.user;
+    await this.push(true);
+    return this.user;
+  },
+  async signOut(){
+    if (this.fb) await this.fb.auth.signOut();
+    this.user = null; this.cloud = null;
+  },
+
+  /* ---------- cloud sync ---------- */
+  docPath(uid){ return "profiles/" + uid; },
+
+  /* Pull the cloud profile and merge it into the local one. */
+  async pull(){
+    if (!this.user) return null;
+    const { db } = await this.load();
+    let cloud = null;
+    try {
+      const snap = await db.collection("profiles").doc(this.user.uid).get();
+      if (snap.exists) cloud = this.sanitize(snap.data());
+    } catch (e) { this.lastError = "could not read your profile"; }
+    this.cloud = cloud;
+    const local = this.local();
+    const merged = this.merge(local, cloud);
+    if (this.user.displayName && !local.name) merged.name = this.user.displayName;
+    this.saveLocal(merged);
+    applyProfileToGame(merged);
+    return merged;
+  },
+
+  /* Push the local profile up. Merges first so two devices cannot clobber. */
+  async push(force){
+    if (!this.user || this.syncing) return null;
+    this.syncing = true;
+    try {
+      const { db } = await this.load();
+      const local = this.local();
+      let cloud = null;
+      if (force) {
+        const snap = await db.collection("profiles").doc(this.user.uid).get();
+        if (snap.exists) cloud = snap.data();
+      } else {
+        cloud = this.cloud;
+      }
+      const merged = this.merge(local, cloud);
+      if (this.user.displayName && merged.name === "Player") merged.name = this.user.displayName;
+      merged.updatedAt = Date.now();
+      await db.collection("profiles").doc(this.user.uid).set(merged, { merge: true });
+      this.cloud = merged;
+      this.lastError = "";
+      return merged;
+    } catch (e) {
+      this.lastError = "sync failed (offline?) - progress kept locally";
+      return null;
+    } finally {
+      this.syncing = false;
+      renderAccountUI();
+    }
+  },
+
+  status(){
+    if (!this.configured) return "accounts not set up";
+    if (!this.user) return "signed out";
+    if (this.syncing) return "syncing...";
+    return "synced";
+  }
+};
+
+/* How long this run took to first reach each rank, kept on the profile so the
+   account carries a little history and not just a number. */
+function recordRankTime(rank){
+  const p = Accounts.local();
+  p.bestTimes = p.bestTimes || {};
+  if (p.bestTimes[rank] === undefined) p.bestTimes[rank] = Math.round(p.playSec || 0);
+  Accounts.saveLocal(p);
+}
+
+/* Push the in-game state into the local profile. Called on a timer and at the
+   moments that matter (death, evolution) rather than every frame. */
+let profileClock = 0;
+function checkpoint(){
+  const p = Accounts.local();
+  p.rank = player.rank;
+  p.xp = player.xp;
+  p.totalXp = player.totalXp;
+  p.bestRank = Math.max(p.bestRank || 0, player.bestRank || player.rank);
+  p.kills = player.kills;
+  p.deaths = player.deaths;
+  p.food = player.foodEaten;
+  p.playSec = (p.playSec || 0) + profileClock;
+  profileClock = 0;
+  Accounts.saveLocal(p);
+  if (Accounts.user) Accounts.push(false);
+}
+function applyProfileToGame(p){
+  if (!p || !player) return;
+  player.rank = clamp(p.rank || 0, 0, RANKS.length - 1);
+  player.xp = p.xp || 0;
+  player.totalXp = p.totalXp || 0;
+  player.bestRank = Math.max(player.bestRank || 0, p.bestRank || 0);
+  player.kills = p.kills || 0;
+  player.deaths = p.deaths || 0;
+  player.foodEaten = p.food || 0;
+  const sp = SPRITES[RANKS[player.rank].key];
+  player.r = sp.w * SCALE * 0.34;
+  player.label = "You";
+  lastPortraitRank = -1;
+}
+
+/* ============================================================
    NETWORK  (peer-to-peer, host authoritative)
    ------------------------------------------------------------
    GitHub Pages cannot run a game server, so one player hosts the
@@ -1153,6 +1516,8 @@ function addXP(e, amount){
       Sfx.evolve();
       pushFeed("EVOLVED &rarr; " + RANKS[e.rank].name.toUpperCase(), "evolve");
       showBanner("EVOLVED!", RANKS[e.rank].name + " \u00b7 rank " + (e.rank+1) + " of " + RANKS.length);
+      recordRankTime(e.rank);
+      checkpoint();
     }
   }
   if (e.rank === RANKS.length-1) e.xp = Math.min(e.xp, RANKS[e.rank].need);
@@ -1268,6 +1633,112 @@ ui.btnJoin.addEventListener("click", async () => {
   setLobbyState();
 });
 ui.btnLeave.addEventListener("click", () => { Net.leave(); setLobbyState(); });
+
+/* ---------------------------------------------------------- account wiring */
+const au = {
+  modal:   document.getElementById("acctModal"),
+  btn:     document.getElementById("acctBtn"),
+  out:     document.getElementById("acctSignedOut"),
+  inn:     document.getElementById("acctSignedIn"),
+  name:    document.getElementById("anName"),
+  email:   document.getElementById("anEmail"),
+  pass:    document.getElementById("anPass"),
+  err:     document.getElementById("acctErr"),
+  note:    document.getElementById("acctNote"),
+  who:     document.getElementById("acctWho")
+};
+
+function acctError(msg){ au.err.textContent = msg || ""; }
+
+function renderAccountUI(){
+  const p = Accounts.local();
+  const signedIn = !!Accounts.user;
+  au.out.style.display  = signedIn ? "none" : "block";
+  au.inn.style.display  = signedIn ? "block" : "none";
+  au.btn.textContent    = signedIn ? "Account: " + (Accounts.user.displayName || p.name) : "Account";
+
+  if (signedIn){
+    const rank = RANKS[p.rank] ? RANKS[p.rank].name : "-";
+    au.who.innerHTML =
+      "Signed in as <b>" + esc(Accounts.user.email || (Accounts.user.isAnonymous ? "anonymous" : "Google")) + "</b><br>" +
+      "<span class='muted'>" + esc(p.name) + " &middot; " + esc(rank) + " &middot; " +
+      p.totalXp.toFixed(1) + " XP &middot; " + p.kills + " kills &middot; " + p.deaths + " deaths</span><br>" +
+      "<span class='muted'>" + Accounts.status() + "</span>";
+    au.note.textContent = Accounts.user.isAnonymous
+      ? "This is a guest session on this device. Add an email to keep it permanently."
+      : "Your progress syncs automatically.";
+  } else {
+    au.note.textContent = Accounts.configured
+      ? "Not signed in. Everything still saves to this device."
+      : "Accounts are not configured in this build yet (FB_CONFIG is empty), so sign-in is unavailable. Progress still saves locally.";
+  }
+  const dis = !Accounts.configured;
+  ["anCreate","anSignIn","anGoogle","anUpgrade"].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = dis;
+  });
+}
+
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+
+au.btn.addEventListener("click", () => {
+  acctError("");
+  au.modal.classList.add("on");
+  renderAccountUI();
+  const p = Accounts.local();
+  if (!au.name.value) au.name.value = p.name || "";
+});
+au.modal.addEventListener("click", e => { if (e.target === au.modal) au.modal.classList.remove("on"); });
+document.getElementById("anSkip").addEventListener("click", () => au.modal.classList.remove("on"));
+
+async function withBusy(btn, fn){
+  const was = btn.textContent;
+  btn.disabled = true; btn.textContent = "...";
+  acctError("");
+  try { await fn(); }
+  catch (e){ acctError(String(e && e.message || e).replace(/^Firebase:\s*/, "")); }
+  finally { btn.disabled = false; btn.textContent = was; renderAccountUI(); }
+}
+
+document.getElementById("anCreate").addEventListener("click", function(){
+  withBusy(this, async () => {
+    const p = Accounts.local();
+    p.name = (au.name.value || "Player").slice(0, 20);
+    Accounts.saveLocal(p);
+    await Accounts.signUp(au.email.value.trim(), au.pass.value, p.name);
+    au.modal.classList.remove("on");
+    showBanner("ACCOUNT CREATED", "Your progress now follows you", 2.4);
+  });
+});
+document.getElementById("anSignIn").addEventListener("click", function(){
+  withBusy(this, async () => {
+    await Accounts.signIn(au.email.value.trim(), au.pass.value);
+    au.modal.classList.remove("on");
+    showBanner("SIGNED IN", "Profile merged from this device", 2.4);
+  });
+});
+document.getElementById("anGoogle").addEventListener("click", function(){
+  withBusy(this, async () => {
+    await Accounts.signInGoogle();
+    au.modal.classList.remove("on");
+    showBanner("SIGNED IN", "Profile merged from this device", 2.4);
+  });
+});
+document.getElementById("anOut").addEventListener("click", function(){
+  withBusy(this, async () => {
+    await Accounts.signOut();
+    showBanner("SIGNED OUT", "Progress still saves to this device", 2.0);
+  });
+});
+document.getElementById("anUpgrade").addEventListener("click", function(){
+  withBusy(this, async () => {
+    await Accounts.upgrade(au.email.value.trim(), au.pass.value);
+    showBanner("SESSION SAVED", "This account now keeps your progress", 2.4);
+  });
+});
 
 /* ============================================================
    HUD
@@ -1455,8 +1926,17 @@ function update(dt){
   /* ---- clients send their input; hosts simulate everything below ---- */
   if (Net.mode === "client"){
     Net.sendInput();
-    if (bannerT > 0){ bannerT -= dt; if (bannerT <= 0){ el.banner.style.display="none"; el.bannerSub.style.display="none"; } }
-    hudTick -= dt; if (hudTick <= 0){ hudTick = 0.06; updateHUD(); }
+    if (bannerT > 0){
+      bannerT -= dt;
+      if (bannerT <= 0){ el.banner.style.display = "none"; el.bannerSub.style.display = "none"; }
+    }
+    hudTick -= dt;
+    if (hudTick <= 0){
+      hudTick = 0.06;
+      updateHUD();
+      profileClock += 0.06;
+      if (profileClock >= 10) checkpoint();
+    }
     return;                       // no AI, no food, no combat authority
   }
 
@@ -1601,7 +2081,14 @@ function update(dt){
     if (bannerT <= 0){ el.banner.style.display="none"; el.bannerSub.style.display="none"; }
   }
   hudTick -= dt;
-  if (hudTick <= 0){ hudTick = 0.06; updateHUD(); }
+  if (hudTick <= 0){
+    hudTick = 0.06;
+    updateHUD();
+    // save progress locally on a slow timer; the cloud push rides along only
+    // when there is an account, and is throttled by Accounts.syncing
+    profileClock += 0.06;
+    if (profileClock >= 10) checkpoint();
+  }
 }
 
 function moveEntity(e, dt){
@@ -1995,7 +2482,10 @@ function startGame(){
   Sfx.init();
   document.getElementById("start").style.display = "none";
   running = true;
-  showBanner("YOU ARE PLANKTON", "Eat green food. Hold click or Space to boost.", 2.6);
+  renderAccountUI();
+  setLobbyState();
+  showBanner("YOU ARE " + RANKS[player.rank].name.toUpperCase(),
+             "Eat green food. Hold click or Space to boost.", 2.6);
 }
 
 /** Wipe the world and start the player over at Plankton. */
@@ -2027,6 +2517,8 @@ window.EvoQuest = {
   Net: Net, NetHooks: NetHooks, rebuildWorldFromSeed: rebuildWorldFromSeed,
   applySnapshot: applySnapshot, cleanRoom: cleanRoom, ui: ui,
   setLobbyState: setLobbyState,
+  Accounts: Accounts, checkpoint: checkpoint, applyProfileToGame: applyProfileToGame,
+  renderAccountUI: renderAccountUI,
   get player(){ return player; },
   get cam(){ return cam; },
   get critters(){ return critters; },
@@ -2044,7 +2536,14 @@ window.EvoQuest = {
 };
 
 initWorld();
+applyProfileToGame(Accounts.local());
 updateHUD();
+renderAccountUI();
+setLobbyState();
+
+/* Never lose progress to a closed tab or a crash. */
+window.addEventListener("beforeunload", () => { if (running) checkpoint(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden && running) checkpoint(); });
 })();
 </script>
 </body>

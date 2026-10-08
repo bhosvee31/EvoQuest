@@ -77,7 +77,71 @@ victim's lifetime XP** and 60% of your boost meter.
 Not built: dedicated servers, accounts, matchmaking, host migration if the host
 quits, and lag compensation. The host is trusted — it could cheat.
 
-## The view
+## Accounts and saved progress
+
+Progress **always saves to this device**, with no account and no network. Open
+`index.html`, play, close it — your rank, XP and stats are still there.
+
+An account is an optional extra that carries that progress to your other
+devices. Click **Account** in the top-right.
+
+### Turning accounts on
+
+Accounts are wired up but **switched off**, because they need your own Firebase
+project. Five-minute setup:
+
+1. Create a project at <https://console.firebase.google.com> (a Google account is
+   enough)
+2. **Build -> Authentication -> Get started**, then enable **Email/Password**
+   and **Google** under Sign-in providers
+3. **Firestore Database -> Create database** (production mode, any region)
+4. **Firestore -> Rules**, paste in the [`firestore.rules`](firestore.rules)
+   from this repo, and Publish
+5. **Project settings -> Your apps -> Web app**, register an app, then copy the
+   config into `FB_CONFIG` near the top of the game script in `index.html`:
+
+   ```js
+   const FB_CONFIG = {
+     apiKey: "AIza...", authDomain: "your-project.firebaseapp.com",
+     projectId: "your-project", storageBucket: "your-project.appspot.com",
+     messagingSenderId: "1234567890", appId: "1:1234567890:web:abc123"
+   };
+   ```
+
+6. Reload. **Account: …** appears and sign-in works.
+
+While `FB_CONFIG` is empty the sign-in buttons are disabled and the game behaves
+exactly as before. The Firebase SDK is only fetched from a CDN when you actually
+click sign-in.
+
+### How merging works
+
+If you sign in on a device that already has progress, the two are **merged**
+rather than one overwriting the other:
+
+- **Progression** (rank, XP) comes from whichever profile is further along the
+  ladder — measured by summing the XP needed to reach that rank and adding what
+  is banked toward the next one
+- **Counters** (kills, deaths, food, playtime, lifetime XP) take the **larger**
+  value, never the sum, so merging the same device twice changes nothing
+- **Best times** per rank keep the faster of the two
+
+Merging is deliberately idempotent so that signing in repeatedly can't inflate
+your numbers.
+
+### Honest limits
+
+- This is client-side, so **progress is editable**. Anyone can open devtools and
+  set their own rank. The Firestore rules block the obvious abuse — you cannot
+  touch someone else's document, decrease your own counters, or jump straight to
+  Vampire in one write — but they cannot make it impossible. That is the price of
+  having no server. Don't build ranked play on top of it.
+- If the host of a multiplayer room quits, everyone drops. There is no server to
+  take over.
+- Auth needs network. Offline play, single player and the profile on disk are
+  unaffected.
+
+
 
 Your creature is **always dead centre** of the screen and the camera never drifts
 or clamps, so you always know exactly where you are. There is no minimap and no
@@ -219,6 +283,9 @@ node tools\headless-test.mjs
 # 37 assertions: two real game instances talking over a loopback transport
 node tools\multiplayer-test.mjs
 
+# 41 assertions: local profile, tampered-storage sanitising, merge policy
+node tools\account-test.mjs
+
 # measure deaths/progression with and without reacting to warnings
 node tools\death-diagnostic.mjs
 
@@ -252,6 +319,7 @@ console.
 ```
 index.html              the entire game
 README.md               this file
+firestore.rules         Firestore security rules (paste into the console)
 tools/
   gen-sprites.ps1       sprite source of truth -> writes into index.html
   render-sprites.ps1    sprite contact sheet -> PNG
@@ -259,10 +327,10 @@ tools/
   harness.mjs           DOM stub + software canvas + PNG encoder
   headless-test.mjs     rule, AI and balance tests
   multiplayer-test.mjs  two peers, join/snapshot/PvP/food-credit/leaving
+  account-test.mjs      profile save/load, sanitising, merge policy
   death-diagnostic.mjs  deaths/progression measurement over many runs
   kill-payout-probe.mjs creature lifetime XP growth and kill payout scaling
-  snapshot.mjs          render game frames to PNG
-  codex-shot.mjs        render the guide panel to PNG
+  hunt-payout-probe.mjs what an actual hunt pays out
 ```
 
 ## Tuning

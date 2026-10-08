@@ -330,6 +330,17 @@ export function boot(opts = {}) {
   const rafQueue = [];
   const listeners = { window: {}, document: {} };
 
+  // In-memory localStorage, so profile save/load can actually be tested.
+  const store = new Map();
+  const localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: (k) => { store.delete(k); },
+    clear: () => store.clear(),
+    key: (i) => [...store.keys()][i] ?? null,
+    get length() { return store.size; }
+  };
+
   // A real monotonic clock. The game rate-limits net sends on performance.now();
   // stubbing it to a constant would stall every send permanently.
   const clock = { t: 0, now: () => (clock.t += 16.7) };
@@ -348,7 +359,9 @@ export function boot(opts = {}) {
       addEventListener(t, f) { (listeners.document[t] ||= []).push(f); },
       body: makeEl("body")
     },
-    performance: clock
+    performance: clock,
+    localStorage,
+    __store: store
   };
   sandbox.window = sandbox;
   sandbox.window.addEventListener = (t, f) => { (listeners.window[t] ||= []).push(f); };

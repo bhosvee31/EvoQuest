@@ -1,0 +1,75 @@
+rules_version = '2';
+
+// EvoQuest profile store.
+//
+// Paste this into Firebase console -> Firestore Database -> Rules -> Publish.
+//
+// The shape of it: a signed-in player may read and write exactly one document,
+// their own, and may not touch anybody else's. Because the game runs entirely
+// in the player's browser, a client CAN edit its own progress by hand -- these
+// rules make that harder (you cannot inflate your score by writing a rank you
+// have not earned in one go, and you cannot rewrite someone else's record) but
+// they cannot make it impossible. That is the trade for having no server.
+//
+// If you ever add a leaderboard, never trust these documents. Compute ranks on
+// the server instead.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function hasOnlyKnownFields() {
+      return request.resource.data.keys().hasOnly([
+        'v', 'name', 'rank', 'xp', 'totalXp', 'bestRank',
+        'kills', 'deaths', 'food', 'playSec', 'bestTimes', 'updatedAt'
+      ]);
+    }
+
+    function saneNumbers() {
+      let d = request.resource.data;
+      let ints = ['v','rank','bestRank','kills','deaths','food','playSec'];
+      for (let f in ints) {
+        if (!(d[f] is int) || d[f] < 0) { return false; }
+      }
+      // rank must be a real rank index, never a wild value
+      if (d.rank > 9 || d.bestRank > 9) { return false; }
+      if (!(d.xp is number) || d.xp < 0 || d.xp > 1000) { return false; }
+      if (!(d.totalXp is number) || d.totalXp < 0 || d.totalXp > 10000000) { return false; }
+      if (!(d.name is string) || d.name.size() > 20) { return false; }
+      if (!(d.bestTimes is map)) { return false; }
+      return true;
+    }
+
+    // Creating your own profile.
+    match /profiles/{uid} {
+      allow read: if isSelf(uid);
+      allow create: if isSelf(uid)
+                    && hasOnlyKnownFields()
+                    && saneNumbers();
+      allow update: if isSelf(uid)
+                    && hasOnlyKnownFields()
+                    && saneNumbers()
+                    // counters and progression may only ever go up, so a client
+                    // cannot lower its own numbers or jump straight to Vampire
+                    && request.resource.data.totalXp >= resource.data.totalXp
+                    && request.resource.data.bestRank >= resource.data.bestRank
+                    && request.resource.data.rank >= resource.data.rank
+                    && request.resource.data.kills >= resource.data.kills
+                    && request.resource.data.food >= resource.data.food;
+      allow delete: if false;   // keeps a leaderboard sane and costs nothing to skip
+    }
+
+    // Rooms for peer-to-peer multiplayer can go here later; deliberately empty
+    // for now because the current build syncs over WebRTC, not Firestore.
+    match /rooms/{roomId} {
+      allow read, write: if false;
+    }
+  }
+}
