@@ -1,0 +1,11 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
+
+# nothing in this project generates build output — index.html is the build.
+# (dev screenshots from tools\ are written to the system temp dir, not here)

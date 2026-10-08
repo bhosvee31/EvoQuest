@@ -1,0 +1,1406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>EvoQuest &mdash; Cursor Evolution Arena</title>
+<style>
+  :root{
+    --bg:#08111c; --panel:rgba(9,20,32,.78); --line:rgba(120,190,255,.18);
+    --ink:#dff1ff; --dim:#7e9cb5; --accent:#5ad1ff; --good:#4ade80;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Courier New",monospace;
+    color:var(--ink);user-select:none;}
+  #game{display:block;width:100%;height:100%;cursor:none;image-rendering:pixelated;}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    box-shadow:0 6px 24px rgba(0,0,0,.45);}
+
+  #hud{position:fixed;inset:0;pointer-events:none;}
+
+  /* ---------- rank / xp card ---------- */
+  #card{position:absolute;top:14px;left:14px;width:310px;padding:11px 12px 12px;display:flex;gap:11px;}
+  #portrait{width:56px;height:56px;flex:0 0 56px;border-radius:8px;background:rgba(0,0,0,.35);
+    border:1px solid var(--line);image-rendering:pixelated;}
+  .grow{flex:1;min-width:0;}
+  .line1{display:flex;align-items:baseline;gap:8px;}
+  #rankName{font-size:17px;font-weight:700;letter-spacing:.3px;}
+  #rankNum{font-size:10px;color:var(--dim);}
+  #xpText{font-size:12px;color:#bfe3ff;margin:5px 0 4px;letter-spacing:.2px;}
+  #xpText b{color:#fff;}
+  #nextText{font-size:10.5px;color:var(--dim);margin:5px 0 4px;}
+  .bar{height:11px;border-radius:6px;background:rgba(0,0,0,.45);overflow:hidden;
+    border:1px solid var(--line);position:relative;}
+  .bar > i{display:block;height:100%;width:0%;border-radius:5px;transition:width .12s linear;}
+  #xpFill{background:linear-gradient(90deg,#2ea8ff,#7ef0b4);box-shadow:0 0 10px rgba(90,209,255,.5);}
+  #boostFill{background:linear-gradient(90deg,#ff9f1c,#ffe066);box-shadow:0 0 10px rgba(255,180,60,.5);}
+  #boostText{font-size:10px;color:var(--dim);margin-top:4px;}
+  #boostText.hot{color:#ffd75e;}
+
+  /* ---------- ladder ---------- */
+  #ladder{position:absolute;top:14px;right:14px;width:172px;padding:9px 9px 8px;}
+  #ladder h4{margin:0 0 6px;font-size:10px;letter-spacing:1.4px;color:var(--dim);font-weight:600;}
+  .rung{display:flex;align-items:center;gap:6px;font-size:11.5px;padding:2px 5px;border-radius:6px;
+    color:#93b2c9;line-height:1.5;}
+  .rung .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto;opacity:.85;}
+  .rung.done{color:#8fe6b4;}
+  .rung.now{background:rgba(90,209,255,.16);color:#fff;box-shadow:inset 0 0 0 1px rgba(90,209,255,.4);font-weight:700;}
+  .rung.now .dot{box-shadow:0 0 8px currentColor;}
+  .rung small{margin-left:auto;color:var(--dim);font-size:9px;}
+  .rung.now small{color:#bfe3ff;}
+
+  /* ---------- stats + minimap ---------- */
+  #stats{position:absolute;bottom:14px;left:14px;padding:9px 12px;font-size:11px;line-height:1.7;
+    display:grid;grid-template-columns:auto auto;gap:0 16px;}
+  #stats span{color:var(--dim);}
+  #stats b{color:#eaf7ff;font-weight:700;}
+  #mini{position:absolute;bottom:14px;right:14px;width:186px;height:126px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;image-rendering:pixelated;}
+
+  /* ---------- feed ---------- */
+  #feed{position:absolute;left:14px;top:0;width:330px;padding-top:150px;}
+  .feed-item{font-size:11px;padding:3px 9px;margin-bottom:4px;border-radius:6px;
+    background:rgba(6,14,24,.7);border-left:3px solid var(--accent);color:#cfe8ff;
+    animation:fadeIn .18s ease-out;}
+  .feed-item.kill{border-left-color:#4ade80;color:#d6ffe6;}
+  .feed-item.death{border-left-color:#ff5b6e;color:#ffd9de;}
+  .feed-item.evolve{border-left-color:#ffd75e;color:#fff3cf;}
+  @keyframes fadeIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+
+  /* ---------- centre banners ---------- */
+  #center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:8px;text-align:center;}
+  .banner{font-size:38px;font-weight:800;letter-spacing:1px;text-shadow:0 4px 22px rgba(0,0,0,.8);}
+  .sub{font-size:13px;color:#cfe4f5;}
+  #deathVeil{position:absolute;inset:0;background:rgba(120,0,20,.28);opacity:0;transition:opacity .18s;}
+  #deathVeil.on{opacity:1;}
+
+  /* ---------- help / codex ---------- */
+  #help{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);padding:7px 14px;
+    font-size:10.5px;color:var(--dim);white-space:nowrap;}
+  #help b{color:#bfe3ff;}
+  #codex{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(4,10,18,.86);pointer-events:auto;}
+  #codex.on{display:flex;}
+  #codexBox{max-width:860px;width:92%;max-height:88%;overflow:auto;padding:20px 24px;}
+  #codexBox h3{margin:0 0 4px;font-size:16px;}
+  #codexBox p{margin:0 0 16px;font-size:11px;color:var(--dim);}
+  #codexGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:12px;}
+  .codexCell{text-align:center;background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:9px;padding:9px 6px;}
+  .codexCell canvas{image-rendering:pixelated;}
+  .codexCell div{font-size:10px;color:var(--dim);margin-top:5px;}
+
+  /* ---------- start ---------- */
+  #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(circle at 50% 40%,#0d2438,#050a12 70%);z-index:5;text-align:center;padding:20px;}
+  #startBox{max-width:560px;width:100%;padding:30px 34px;}
+  #startBox h1{margin:0 0 2px;font-size:38px;letter-spacing:2px;
+    background:linear-gradient(90deg,#5ad1ff,#7ef0b4,#ffd75e);-webkit-background-clip:text;
+    background-clip:text;color:transparent;}
+  #startBox h2{margin:0 0 20px;font-size:11px;letter-spacing:3px;color:var(--dim);font-weight:500;}
+  #startBox p{font-size:12.5px;line-height:1.85;color:#b9d3e6;margin:0 0 6px;}
+  #startBox p b{color:#fff;}
+  #startBox ol{text-align:left;font-size:12px;line-height:1.9;color:#b9d3e6;
+    margin:16px auto 22px;padding-left:22px;display:inline-block;}
+  #startBox ol b{color:#ffd75e;}
+  #go{pointer-events:auto;cursor:pointer;font:inherit;font-size:14px;font-weight:700;letter-spacing:1px;
+    padding:13px 34px;border-radius:10px;color:#04121c;border:none;
+    background:linear-gradient(90deg,#5ad1ff,#7ef0b4);box-shadow:0 8px 26px rgba(90,209,255,.32);}
+  #go:hover{filter:brightness(1.1);}
+  .tiny{font-size:10px;color:var(--dim);margin-top:16px;}
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="card" class="panel">
+    <canvas id="portrait" width="112" height="112"></canvas>
+    <div class="grow">
+      <div class="line1"><span id="rankName">Plankton</span><span id="rankNum">RANK 1 / 10</span></div>
+      <div id="xpText"><b>0.0</b> / 5.0 XP <span style="color:#7e9cb5">&mdash; next rank</span></div>
+      <div class="bar"><i id="xpFill"></i></div>
+      <div id="nextText">Evolve into <b style="color:#bfe3ff">Fish</b> &middot; needs 7 XP</div>
+      <div class="bar"><i id="boostFill"></i></div>
+      <div id="boostText">BOOST 0.0s / 5.0s &mdash; hold <b>SPACE</b> or <b>CLICK</b></div>
+    </div>
+  </div>
+
+  <div id="ladder" class="panel">
+    <h4>RANK LADDER</h4>
+    <div id="rungs"></div>
+  </div>
+
+  <div id="stats" class="panel">
+    <span>Food eaten</span><b id="sFood">0</b>
+    <span>Creatures eaten</span><b id="sKills">0</b>
+    <span>Times eaten</span><b id="sDeaths">0</b>
+    <span>Total XP</span><b id="sXp">0.0</b>
+  </div>
+
+  <canvas id="mini" width="186" height="126"></canvas>
+
+  <div id="feed"></div>
+  <div id="center">
+    <div class="banner" id="banner" style="display:none"></div>
+    <div class="sub" id="bannerSub" style="display:none"></div>
+  </div>
+  <div id="deathVeil"></div>
+
+  <div id="help" class="panel">
+    <b>Mouse</b> steer &nbsp;&middot;&nbsp; <b>Hold LMB / Space</b> boost &nbsp;&middot;&nbsp;
+    <b>C</b> bestiary &nbsp;&middot;&nbsp; <b>M</b> sound &nbsp;&middot;&nbsp; <b>R</b> restart &nbsp;&middot;&nbsp;
+    <b>Esc</b> pause &nbsp;&middot;&nbsp; <span id="dlLink" style="pointer-events:auto;cursor:pointer;text-decoration:underline">download offline copy</span>
+  </div>
+
+  <div id="codex">
+    <div id="codexBox" class="panel">
+      <h3>Bestiary &amp; Forage</h3>
+      <p>Every sprite in EvoQuest, drawn from pixel data &mdash; no image files. Press <b>C</b> or click to close.</p>
+      <div id="codexGrid"></div>
+    </div>
+  </div>
+</div>
+
+<div id="start">
+  <div id="startBox" class="panel">
+    <h1>EVOQUEST</h1>
+    <h2>CURSOR EVOLUTION ARENA</h2>
+    <p>You begin as a speck of <b>Plankton</b>. Eat, evolve, survive.</p>
+    <ol>
+      <li><b>Move</b> &mdash; your creature walks toward your cursor.</li>
+      <li><b>Boost</b> &mdash; hold <b>left click</b> or <b>Spacebar</b> for a speed burst.</li>
+      <li><b>Eat</b> &mdash; floor food is <b>0.5 XP</b>. You may eat anything <b>below</b> your rank.</li>
+      <li><b>Hunt</b> &mdash; killing another creature gives you <b>25%</b> of their XP.</li>
+      <li><b>Survive</b> &mdash; if you are eaten you return with <b>50%</b> of your XP.</li>
+    </ol>
+    <button id="go">ENTER THE FOOD CHAIN</button>
+    <div class="tiny">Runs entirely offline &middot; single HTML file &middot; best with a mouse</div>
+  </div>
+</div>
+
+<script id="sprites-data" type="application/json">
+{
+  "butterfly": {
+    "label": "Butterfly", "w": 22, "h": 16,
+    "pal": {"k": "#2a1546", "a": "#4c1d95", "b": "#7c3aed", "c": "#c4b5fd", "w": "#ffffff", "y": "#fde047"},
+    "rows": [
+      "......................",
+      "........k....k........",
+      ".........k..k.........",
+      ".....kkccckkccckk.....",
+      "....kcccccccccccck....",
+      "...kcwwccakkaccwwck...",
+      "..kcwccccckkcccccwck..",
+      "..kcwcccbbkkbbcccwck..",
+      ".kcwcccbbakkabbcccwck.",
+      ".kcwccbbbakkabbbccwck.",
+      ".kcwccbbbakkabbbccwck.",
+      "..kcwbbbbakkabbbbwck..",
+      "..kccbbbbakkabbbbcck..",
+      "...kccbbbakkabbbcck...",
+      "....kkbbbakkabbbkk....",
+      "......kkkk..kkkk......"
+    ]
+  },
+  "crab": {
+    "label": "Crab", "w": 22, "h": 17,
+    "pal": {"k": "#6b1212", "a": "#e2453b", "b": "#ffb3a7", "p": "#4a0b0b", "w": "#ffffff"},
+    "rows": [
+      "...kk............kk...",
+      "..kbbk..........kbbk..",
+      ".kbbbbk........kbbbbk.",
+      "kbbbbbk........kbbbbbk",
+      "kbbpbbbk......kbbbpbbk",
+      ".kb..bbk......kbb..bk.",
+      "..kk..kk......kk..kk..",
+      "...k..kwk....kwk..k...",
+      "...k..kpk....kpk..k...",
+      "....kbaabk..kbaabk....",
+      "...kbaaabk..kbaaabk...",
+      "..kkbaaabkkkkbaaabkk..",
+      ".kkbaaaaabkkbaaaaabkk.",
+      ".kkbaaaaabkkbaaaaabkk.",
+      "..kkbaaaabkkbaaaabkk..",
+      "..kkkkkkkk..kkkkkkkk..",
+      "..k.k.k.k.kk.k.k.k.k.."
+    ]
+  },
+  "sparrow": {
+    "label": "Sparrow", "w": 22, "h": 16,
+    "pal": {"k": "#3b2412", "a": "#b5793f", "b": "#8a5527", "c": "#d9a066", "w": "#ffffff", "y": "#f2b134"},
+    "rows": [
+      ".........k..k.........",
+      ".........kkkk.........",
+      ".......kcccccck.......",
+      "......kcwckkcwck......",
+      "......kcwwyywwck......",
+      "......kcwwyywwck......",
+      "......kccckkccck......",
+      ".....kcaaccccaack.....",
+      "....kcaaaccccaaack....",
+      "...kcabbaaccaabback...",
+      "..kcabbbaaccaabbback..",
+      "..kcabbbaaccaabbback..",
+      "..kcabbaaaccaaabback..",
+      "...kcaaaackkcaaaack...",
+      "....kkccckkkkccckk....",
+      ".....kkcckkkkcckk....."
+    ]
+  },
+  "pigeon": {
+    "label": "Pigeon", "w": 22, "h": 19,
+    "pal": {"k": "#2f3542", "a": "#98a3b4", "b": "#5c6779", "c": "#c3cbd6", "n": "#3fbfa0", "w": "#ffffff", "y": "#f2b134"},
+    "rows": [
+      ".........k..k.........",
+      ".........kkkk.........",
+      ".......kcccccck.......",
+      "......kcwckkcwck......",
+      "......kcwnkknwck......",
+      "......kccckkccck......",
+      "......kccckkccck......",
+      ".....kcaaccccaack.....",
+      "...kcannaaccaannack...",
+      "...kcabbaaccaabback...",
+      "..kcabbbaaccaabbback..",
+      "..kcabbbaaccaabbback..",
+      "..kcabbaaaccaaabback..",
+      "...kcaaaackkcaaaack...",
+      "....kcaaaakkaaaack....",
+      ".....kkcckkkkcckk.....",
+      ".....kkcckkkkcckk.....",
+      "....k.k........k.k....",
+      "....k.k........k.k...."
+    ]
+  },
+  "wasp": {
+    "label": "Wasp", "w": 20, "h": 20,
+    "pal": {"k": "#141414", "y": "#ffc21a", "w": "#d8f3ff"},
+    "rows": [
+      ".wwwww........wwwww.",
+      ".wwwww........wwwww.",
+      ".wwwww........wwwww.",
+      ".wwwww........wwwww.",
+      "..wwwww......wwwww..",
+      "......k.k..k.k......",
+      ".....kwwwkkwwwk.....",
+      ".....kwywkkwywk.....",
+      ".....kwwwkkwwwk.....",
+      ".....kkyykkyykk.....",
+      "......kkkkkkkk......",
+      "..k...kyyyyyyk...k..",
+      "..k....kk..kk....k..",
+      ".....kyyyyyyyyk.....",
+      ".....kkkkkkkkkk.....",
+      ".....kyyyyyyyyk.....",
+      ".....kkkkkkkkkk.....",
+      "......kkkkkkkk......",
+      "......kk....kk......",
+      "........k..k........"
+    ]
+  },
+  "berry": {
+    "label": "Berries", "w": 16, "h": 12,
+    "pal": {"k": "#4a0d20", "a": "#ef4444", "b": "#991b1b", "c": "#fca5a5", "w": "#ffffff"},
+    "rows": [
+      "................",
+      "...k........k...",
+      "..kk........kk..",
+      "..kcck....kcck..",
+      ".kcccck..kcccck.",
+      "kcwwacckkccawwck",
+      "kcaaaackkcaaaack",
+      "kcaaabckkcbaaack",
+      "kcbbbbckkcbbbbck",
+      ".kbbbbk..kbbbbk.",
+      "..kkkk....kkkk..",
+      "................"
+    ]
+  },
+  "plankton": {
+    "label": "Plankton", "w": 16, "h": 14,
+    "pal": {"k": "#0b3b2a", "a": "#3ad17f", "b": "#1f8f5c", "c": "#a6f7c8", "d": "#ffe66d", "w": "#ffffff"},
+    "rows": [
+      "................",
+      "..d......d......",
+      "..d......d......",
+      "...k....k.......",
+      "..kaaakkaak.....",
+      ".kaaaaaaaak.....",
+      ".kaaccaaaac.....",
+      "k.aawaaaawaak...",
+      "k.aaaaaaaaaaak..",
+      "k.abaaaaaabak...",
+      ".kbaaaaaaabk....",
+      "..kbbaaaabbk....",
+      "...kkkkkkkk.....",
+      "................"
+    ]
+  },
+  "fish": {
+    "label": "Fish", "w": 20, "h": 13,
+    "pal": {"k": "#0a2f52", "a": "#2f8fd8", "b": "#1c5f9c", "c": "#8fdcff", "w": "#ffffff", "y": "#ffd75e"},
+    "rows": [
+      "....................",
+      "........kkkk........",
+      ".......kcccck.......",
+      "kk.....kcccck.......",
+      "kck..kcaawccck......",
+      "kcckkaaaaaaacck.....",
+      "kccckaayyaaaaaaak...",
+      "kcckkaaaaaaacck.....",
+      "kck..kcaacccck......",
+      "kk....kcaccck.......",
+      ".......kkkkk........",
+      "....................",
+      "...................."
+    ]
+  },
+  "krill": {
+    "label": "Krill", "w": 16, "h": 10,
+    "pal": {"k": "#4c0519", "a": "#fb7185", "c": "#fecdd3", "b": "#9f1239"},
+    "rows": [
+      "................",
+      "....kkkk........",
+      "..kkcccckk......",
+      ".kccaaaaackk....",
+      "kccaaaaaaaacck..",
+      "kccaaaaaaaacck..",
+      ".kbbbaaaabbbk...",
+      "..kkbbbbbbkk....",
+      "....kkkkkk......",
+      "................"
+    ]
+  },
+  "bee": {
+    "label": "Bee", "w": 21, "h": 14,
+    "pal": {"k": "#151515", "y": "#ffc21a", "w": "#d8f3ff", "b": "#6b4b00"},
+    "rows": [
+      ".....................",
+      "...ww........ww......",
+      "..wwww......wwww.....",
+      "..wwww..kk..wwww.....",
+      "....ww.kyyk.ww.......",
+      "...kkkkyyyykkkkk.....",
+      "..kyyyyyyyyyyyyk.....",
+      ".kyykyyykyyykyyyyk...",
+      ".kyykyyykyyykyyyyk...",
+      "..kyyyyyyyyyyyyk.....",
+      "...kkyykyykkkkk......",
+      ".....yk..k...........",
+      "......k..............",
+      "....................."
+    ]
+  },
+  "owl": {
+    "label": "Owl", "w": 25, "h": 21,
+    "pal": {"k": "#2b1d12", "a": "#8a5a2b", "b": "#5c3a17", "c": "#c98a4b", "w": "#ffffff", "p": "#160d05", "y": "#f2b134"},
+    "rows": [
+      ".......k........k........",
+      "......kak......kak.......",
+      ".....kaak......kaak......",
+      "....kbbakkkkkkkabbk......",
+      "..kkbbaaaaaaaaaaaabbkk...",
+      ".kcbbaaaaaaaaaaaaaabbbk..",
+      "kcbaaawwwwwwwwwwwaaabck..",
+      "kcbaawwpppawwwwpwwaaabck.",
+      "kcbaawwpppawwwwpwwaaabck.",
+      "kcbaaawwwwwawwwwwaaabck..",
+      "kcbbaaaaaaaaaaaaaaaabck..",
+      "kcbbaakkkkkkkkkkkkaabck..",
+      "kcbbaakyyyyyyyyyykaabck..",
+      "kcbbaakkkkkkkkkkkkaabck..",
+      "kcbbaaaaaaaaaaaaaaaabck..",
+      ".kcbbaaaaaaaaaaaaaabck...",
+      "..kkbbaaaaaaaaaaaabbkk...",
+      "....kbbbbbbbbbbbbbbk.....",
+      ".....kkkkkkkkkkkkkk......",
+      ".......kk..kk..kk........",
+      "........................."
+    ]
+  },
+  "vampire": {
+    "label": "Vampire", "w": 25, "h": 19,
+    "pal": {"k": "#12060f", "a": "#c8102e", "b": "#7a0a1c", "c": "#2a2a33", "w": "#ffffff", "p": "#5a1020", "e": "#ffd9a0"},
+    "rows": [
+      "...kk..............kk....",
+      "..kcck............kcck...",
+      ".kcccck..........kcccck..",
+      "kcccccck........kcccccck.",
+      "kcccccccckkkkkkcccccccck.",
+      "kcccccccccceeeccccccccck.",
+      "kcbbbbccccccppcccccccbbck",
+      "kcbbbbcccccwewccccccbbcck",
+      ".kbbbbbbbcccwewcccbbbbbbk",
+      ".kbbbbbbbbccwcccccbbbbbbk",
+      "..kbbbbbbbbcccccbbbbbbbk.",
+      "...kkbbbbbbbbbbbbbbbbkk..",
+      ".....kkbbbbbbbbbbbbbbkk..",
+      ".......kkkkkkkkkkkkkk....",
+      ".........kk.kk...........",
+      ".........................",
+      ".........................",
+      ".........................",
+      "........................."
+    ]
+  },
+  "algae": {
+    "label": "Algae", "w": 13, "h": 12,
+    "pal": {"k": "#14532d", "a": "#22c55e", "c": "#86efac", "b": "#15803d"},
+    "rows": [
+      ".............",
+      "..kk..kk.....",
+      ".kaak.kaak...",
+      "kcaaaakcaack.",
+      "kcaacaaacaak.",
+      "kcaaaaaaaack.",
+      "kbaaaaaaaabk.",
+      ".kbaaaaaabk..",
+      "..kbbaabbk...",
+      "...kkkkkk....",
+      ".............",
+      "............."
+    ]
+  },
+  "mushroom": {
+    "label": "Mushroom", "w": 12, "h": 14,
+    "pal": {"k": "#3f2d16", "a": "#f59e0b", "c": "#fcd34d", "b": "#b45309", "w": "#fff7ed"},
+    "rows": [
+      "....kkkk....",
+      "...kcccck...",
+      "..kcccccck..",
+      ".kcccccccck.",
+      "kaccccccccck",
+      "kaccccccccck",
+      "kcccccccccck",
+      ".kkkkkkkkkk.",
+      "....kwwk....",
+      "....kwwk....",
+      "....kaak....",
+      "....kbak....",
+      "....kbak....",
+      ".....kk....."
+    ]
+  }
+}
+</script>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================================================
+   CONFIG
+   ============================================================ */
+const WORLD      = { w: 3000, h: 2100 };
+const FOOD_COUNT = 380;
+const NPC_COUNT  = 180;
+const SCALE      = 3;    // creature sprite zoom
+const FOOD_SCALE = 2;    // food sits a size class below creatures on purpose
+
+const BOOST_MAX    = 5.0;   // seconds of boost available
+const BOOST_MULT   = 1.95;  // speed multiplier while boosting
+const FOOD_XP      = 0.5;   // xp per floor food
+const FOOD_ENERGY  = 0.45;  // boost seconds refunded per food
+const KILL_ENERGY  = 1.75;  // boost seconds refunded per kill
+const KILL_XP_SHARE= 0.25;  // share of victim's xp taken
+const DEATH_XP_KEEP= 0.5;   // xp retained after being eaten
+const RESPAWN_TIME = 2.4;
+const SPAWN_SAFE  = 2.6;    // seconds of protection after (re)spawning
+const SPAWN_CLEAR = 620;    // respawn this far from anything higher rank
+
+const RANKS = [
+  { key:"plankton",  name:"Plankton",  need:5,  speed:62,  color:"#3ad17f" },
+  { key:"fish",      name:"Fish",      need:7,  speed:70,  color:"#2f8fd8" },
+  { key:"butterfly", name:"Butterfly", need:9,  speed:90,  color:"#8b5cf6" },
+  { key:"bee",       name:"Bee",       need:12, speed:98,  color:"#ffc21a" },
+  { key:"crab",      name:"Crab",      need:15, speed:80,  color:"#e2453b" },
+  { key:"sparrow",   name:"Sparrow",   need:19, speed:110, color:"#b5793f" },
+  { key:"pigeon",    name:"Pigeon",    need:23, speed:100, color:"#98a3b4" },
+  { key:"wasp",      name:"Wasp",      need:28, speed:128, color:"#ff9f1c" },
+  { key:"owl",       name:"Owl",       need:34, speed:112, color:"#8a5a2b" },
+  { key:"vampire",   name:"Vampire",   need:40, speed:138, color:"#c8102e" }
+];
+
+const FOOD_KINDS = ["algae","berry","krill","mushroom"];
+const FOOD_LABEL = { algae:"Algae", berry:"Berries", krill:"Krill", mushroom:"Mushroom" };
+
+const TAU = Math.PI * 2;
+const rand  = (a,b)=> a + Math.random()*(b-a);
+const randi = (a,b)=> Math.floor(rand(a,b+1));
+const clamp = (v,a,b)=> v<a?a:(v>b?b:v);
+const lerp  = (a,b,t)=> a + (b-a)*t;
+const dist2 = (ax,ay,bx,by)=>{ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; };
+
+/* ============================================================
+   SPRITES
+   ============================================================ */
+const SPRITE_DEFS = JSON.parse(document.getElementById("sprites-data").textContent);
+const SPRITES = {};
+
+function buildSprite(id, def){
+  const rows = def.rows, h = rows.length;
+  let w = def.w || 0;
+  for (let i=0; i<h; i++) if (rows[i].length > w) w = rows[i].length;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  const img = g.createImageData(w, h);
+  const lut = {};
+  for (const k in def.pal){
+    const hex = def.pal[k];
+    lut[k] = [parseInt(hex.substr(1,2),16), parseInt(hex.substr(3,2),16), parseInt(hex.substr(5,2),16)];
+  }
+  for (let y=0; y<h; y++){
+    const row = rows[y] || "";
+    for (let x=0; x<row.length && x<w; x++){
+      const ch = row.charAt(x);
+      if (ch === "." || !lut[ch]) continue;
+      const i = (y*w + x) * 4, col = lut[ch];
+      img.data[i]=col[0]; img.data[i+1]=col[1]; img.data[i+2]=col[2]; img.data[i+3]=255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  SPRITES[id] = { id:id, canvas:c, w:w, h:h, label:def.label || id };
+}
+for (const id in SPRITE_DEFS) buildSprite(id, SPRITE_DEFS[id]);
+
+function drawSprite(g, sp, x, y, flip, alpha, scale){
+  const z = scale || SCALE;
+  const w = sp.w * z, h = sp.h * z;
+  g.save();
+  if (alpha !== undefined && alpha < 1) g.globalAlpha = alpha;
+  if (flip){
+    g.translate(x, y); g.scale(-1, 1);
+    g.drawImage(sp.canvas, -w/2, -h/2, w, h);
+  } else {
+    g.drawImage(sp.canvas, x - w/2, y - h/2, w, h);
+  }
+  g.restore();
+}
+
+/* ============================================================
+   CANVAS
+   ============================================================ */
+const cv  = document.getElementById("game");
+const ctx = cv.getContext("2d");
+let VW = 0, VH = 0, DPR = 1;
+
+function resize(){
+  DPR  = Math.min(2, window.devicePixelRatio || 1);
+  VW   = window.innerWidth;
+  VH   = window.innerHeight;
+  cv.width  = Math.floor(VW * DPR);
+  cv.height = Math.floor(VH * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* ============================================================
+   AUDIO (tiny synth, no assets)
+   ============================================================ */
+const Sfx = {
+  ac:null, on:true,
+  init(){
+    if (this.ac) return;
+    try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ this.on = false; }
+  },
+  tone(freq, dur, type, vol, slide){
+    if (!this.on || !this.ac) return;
+    const t = this.ac.currentTime;
+    const o = this.ac.createOscillator(), g = this.ac.createGain();
+    o.type = type || "square";
+    o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, slide), t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol || 0.05, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.ac.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  },
+  eat(){ this.tone(760, 0.07, "square", 0.035, 1120); },
+  kill(){ this.tone(420, 0.13, "sawtooth", 0.05, 900); this.tone(180, 0.16, "square", 0.03, 120); },
+  death(){ this.tone(300, 0.4, "sawtooth", 0.055, 60); },
+  evolve(){ [523,659,784,1047].forEach((f,i)=> setTimeout(()=> this.tone(f,0.14,"triangle",0.05), i*72)); },
+  boostStart(){ this.tone(240, 0.12, "sine", 0.03, 520); }
+};
+
+/* ============================================================
+   WORLD STATE
+   ============================================================ */
+let foods = [], critters = [], player = null;
+let cam = { x:0, y:0 };
+let time = 0, running = false, paused = false;
+let hudTick = 0;
+
+function makeCritter(rank, x, y, isPlayer){
+  const sp = SPRITES[RANKS[rank].key];
+  return {
+    isPlayer: !!isPlayer,
+    rank: rank,
+    xp: 0,
+    x: x, y: y,
+    vx: 0, vy: 0,
+    r: sp.w * SCALE * 0.34,
+    face: 1,
+    wobble: rand(0, TAU),
+    boost: isPlayer ? BOOST_MAX : 0,
+    boosting: false,
+    invuln: isPlayer ? SPAWN_SAFE : 0,
+    burst: 0,
+    flash: 0,
+    dead: false, deadT: 0,
+    state: "wander", target: null, think: rand(0,1),
+    wanderAng: rand(0, TAU), wanderT: 0,
+    totalXp: 0,
+    kills: 0, deaths: 0, foodEaten: 0,
+    bestRank: rank,
+    label: isPlayer ? "You" : RANKS[rank].name
+  };
+}
+
+function spawnFood(x, y, kind){
+  return { x:x, y:y, kind: kind || FOOD_KINDS[randi(0, FOOD_KINDS.length-1)],
+           phase: rand(0, TAU), dead: false, respawn: 0 };
+}
+
+function initWorld(){
+  foods = [];
+  for (let i = 0; i<FOOD_COUNT; i++)
+    foods.push(spawnFood(rand(40, WORLD.w-40), rand(40, WORLD.h-40)));
+
+  critters = [];
+  const cx = WORLD.w/2, cy = WORLD.h/2;
+  player = makeCritter(0, cx, cy, true);
+
+  for (let i=0; i<NPC_COUNT; i++){
+    const rank = weightedRank();
+    let x, y, d = 0;
+    do { x = rand(60, WORLD.w-60); y = rand(60, WORLD.h-60); d = dist2(x,y,cx,cy); }
+    while (d < 300*300 && d < 1e12);
+    critters.push(makeCritter(rank, x, y, false));
+  }
+  cam.x = player.x - VW/2; cam.y = player.y - VH/2;
+}
+
+function weightedRank(){
+  const roll = Math.random();
+  if (roll < 0.26) return 0;
+  if (roll < 0.48) return 1;
+  if (roll < 0.62) return 2;
+  if (roll < 0.74) return 3;
+  if (roll < 0.84) return 4;
+  if (roll < 0.90) return 5;
+  if (roll < 0.945) return 6;
+  if (roll < 0.975) return 7;
+  if (roll < 0.993) return 8;
+  return 9;
+}
+
+function addXP(e, amount){
+  e.xp += amount; e.totalXp += amount;
+  // at the top of the ladder there is nothing to evolve into, but keep taking
+  // the XP so the bar still fills as a running score
+  if (e.rank >= RANKS.length-1){
+    e.xp = Math.min(e.xp, RANKS[e.rank].need);
+    return false;
+  }
+  let evolved = false;
+  while (e.rank < RANKS.length-1 && e.xp >= RANKS[e.rank].need){
+    e.xp -= RANKS[e.rank].need;
+    e.rank++;
+    if (e.rank > e.bestRank) e.bestRank = e.rank;
+    const sp = SPRITES[RANKS[e.rank].key];
+    e.r = sp.w * SCALE * 0.34;
+    if (!e.isPlayer) e.label = RANKS[e.rank].name;
+    evolved = true;
+    if (e.isPlayer){
+      e.boost = BOOST_MAX;
+      e.burst = 1;
+      Sfx.evolve();
+      pushFeed("EVOLVED &rarr; " + RANKS[e.rank].name.toUpperCase(), "evolve");
+      showBanner("EVOLVED!", RANKS[e.rank].name + " \u00b7 rank " + (e.rank+1) + " of " + RANKS.length);
+    }
+  }
+  if (e.rank === RANKS.length-1) e.xp = Math.min(e.xp, RANKS[e.rank].need);
+  return evolved;
+}
+
+function refillBoost(e, secs){
+  e.boost = Math.min(BOOST_MAX, e.boost + secs);
+}
+
+/* ============================================================
+   INPUT
+   ============================================================ */
+const input = { mx: VW/2, my: VH/2, down: false, space: false, active: false };
+
+window.addEventListener("pointermove", e => { input.mx = e.clientX; input.my = e.clientY; input.active = true; });
+window.addEventListener("pointerdown", e => {
+  input.mx = e.clientX; input.my = e.clientY; input.down = true; input.active = true;
+  if (e.target === cv) e.preventDefault();
+});
+window.addEventListener("pointerup",     () => { input.down = false; });
+window.addEventListener("pointercancel", () => { input.down = false; });
+window.addEventListener("contextmenu",   e => e.preventDefault());
+window.addEventListener("blur",          () => { input.down = false; input.space = false; });
+
+window.addEventListener("keydown", e => {
+  if (e.code === "Space"){ input.space = true; e.preventDefault(); }
+  else if (e.code === "Escape"){
+    if (running){
+      if (el.codex.classList.contains("on")) toggleCodex();   // Esc backs out of the bestiary first
+      else togglePause();
+    }
+  }
+  else if (e.code === "KeyC"){ toggleCodex(); }
+  else if (e.code === "KeyM"){ Sfx.on = !Sfx.on; toast(Sfx.on ? "Sound on" : "Sound off"); }
+  else if (e.code === "KeyR"){ if (running) restart(); }
+  if (e.code === "Space" && !running) startGame();
+});
+window.addEventListener("keyup", e => { if (e.code === "Space") input.space = false; });
+
+document.getElementById("codex").addEventListener("click", toggleCodex);
+
+/* --------------------------------------------------------------- self-export
+   The page is already a single standalone file, so offer to save a copy of
+   exactly what is being played. Works from file:// as well as http://. */
+function downloadSelf(){
+  try {
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll(".feed-item").forEach(n => n.remove());
+    const start = clone.querySelector("#start");
+    if (start) start.style.display = "";
+    const codex = clone.querySelector("#codex");
+    if (codex) codex.classList.remove("on");
+    const html = "<!DOCTYPE html>\n" + clone.outerHTML;
+    const blob = new Blob([html], { type: "text/html" });
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "evoquest.html";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast("Saved evoquest.html");
+  } catch (err) {
+    toast("Use your browser's Save As instead");
+  }
+}
+document.getElementById("dlLink").addEventListener("click", downloadSelf);
+
+/* ============================================================
+   HUD
+   ============================================================ */
+const el = {
+  rankName: document.getElementById("rankName"),
+  rankNum:  document.getElementById("rankNum"),
+  xpText:   document.getElementById("xpText"),
+  xpFill:   document.getElementById("xpFill"),
+  nextText: document.getElementById("nextText"),
+  boostFill:document.getElementById("boostFill"),
+  boostText:document.getElementById("boostText"),
+  rungs:    document.getElementById("rungs"),
+  sFood:    document.getElementById("sFood"),
+  sKills:   document.getElementById("sKills"),
+  sDeaths:  document.getElementById("sDeaths"),
+  sXp:      document.getElementById("sXp"),
+  feed:     document.getElementById("feed"),
+  banner:   document.getElementById("banner"),
+  bannerSub:document.getElementById("bannerSub"),
+  veil:     document.getElementById("deathVeil"),
+  portrait: document.getElementById("portrait"),
+  codex:    document.getElementById("codex"),
+  codexGrid:document.getElementById("codexGrid"),
+  mini:     document.getElementById("mini")
+};
+
+RANKS.forEach((r,i) => {
+  const d = document.createElement("div");
+  d.className = "rung"; d.dataset.rank = i;
+  d.innerHTML = '<span class="dot" style="color:'+r.color+'"></span><span class="nm">'+r.name+'</span><small>'+r.need+' XP</small>';
+  el.rungs.appendChild(d);
+});
+const rungEls = Array.prototype.slice.call(el.rungs.children);
+
+const pg = el.portrait.getContext("2d");
+let lastPortraitRank = -1;
+function drawPortrait(rank){
+  if (rank === lastPortraitRank) return;
+  lastPortraitRank = rank;
+  const sp = SPRITES[RANKS[rank].key];
+  pg.clearRect(0,0,112,112);
+  pg.imageSmoothingEnabled = false;
+  const s = Math.max(2, Math.floor(Math.min(112/sp.w, 112/sp.h)));
+  pg.drawImage(sp.canvas, Math.round((112 - sp.w*s)/2), Math.round((112 - sp.h*s)/2), sp.w*s, sp.h*s);
+}
+
+function pushFeed(html, cls){
+  const d = document.createElement("div");
+  d.className = "feed-item" + (cls ? " "+cls : "");
+  d.innerHTML = html;
+  el.feed.appendChild(d);
+  while (el.feed.children.length > 6) el.feed.removeChild(el.feed.firstChild);
+  setTimeout(() => { d.style.transition = "opacity .4s"; d.style.opacity = 0; setTimeout(()=> d.remove(), 420); }, 4200);
+}
+
+let bannerT = 0;
+function showBanner(text, sub, time_){
+  el.banner.textContent = text;
+  el.bannerSub.textContent = sub || "";
+  el.banner.style.display = "block"; el.bannerSub.style.display = sub ? "block" : "none";
+  bannerT = time_ || 1.9;
+}
+
+let toastT = 0;
+function toast(msg){ showBanner(msg, "", 1.1); }
+
+function updateHUD(){
+  const r = RANKS[player.rank], max = RANKS.length-1;
+  drawPortrait(player.rank);
+  el.rankName.textContent = r.name;
+  el.rankName.style.color = r.color;
+  el.rankNum.textContent = "RANK " + (player.rank+1) + " / " + RANKS.length;
+
+  const isMax = player.rank === max;
+  const shown = isMax ? RANKS[max].need : player.xp;
+  el.xpText.innerHTML = "<b>" + shown.toFixed(1) + "</b> / " + r.need.toFixed(1) + " XP " +
+    (isMax ? '<span style="color:#ffd75e">&#9733; MAX RANK</span>'
+           : '<span style="color:#7e9cb5">&mdash; to ' + RANKS[player.rank+1].name + '</span>');
+  el.xpFill.style.width = clamp(shown / r.need * 100, 0, 100) + "%";
+
+  if (isMax){
+    el.nextText.innerHTML = "Peak of the food chain. Keep eating.";
+  } else {
+    const nxt = RANKS[player.rank+1];
+    el.nextText.innerHTML = "Evolve into <b style='color:#bfe3ff'>" + nxt.name + "</b> &middot; needs " +
+      nxt.need + " XP";
+  }
+
+  el.boostFill.style.width = clamp(player.boost / BOOST_MAX * 100, 0, 100) + "%";
+  el.boostText.textContent = "BOOST " + player.boost.toFixed(1) + "s / " + BOOST_MAX.toFixed(1) +
+    "s ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â hold SPACE or CLICK";
+  el.boostText.className = player.boost < 0.4 ? "hot" : "";
+
+  el.sFood.textContent   = player.foodEaten;
+  el.sKills.textContent  = player.kills;
+  el.sDeaths.textContent = player.deaths;
+  el.sXp.textContent     = player.totalXp.toFixed(1);
+
+  for (let i=0;i<rungEls.length;i++){
+    const c = rungEls[i];
+    c.className = "rung" + (i === player.rank ? " now" : (i < player.rank ? " done" : ""));
+  }
+}
+
+/* ---------- bestiary ---------- */
+let codexBuilt = false;
+function buildCodex(){
+  if (codexBuilt) return;
+  codexBuilt = true;
+  const order = RANKS.map(r=>r.key).concat(FOOD_KINDS);
+  order.forEach(id => {
+    const sp = SPRITES[id];
+    const cell = document.createElement("div");
+    cell.className = "codexCell";
+    const c = document.createElement("canvas");
+    const s = 5;
+    c.width = sp.w*s; c.height = sp.h*s;
+    c.style.width = (sp.w*s*0.62) + "px"; c.style.height = (sp.h*s*0.62) + "px";
+    const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+    g.drawImage(sp.canvas, 0, 0, sp.w*s, sp.h*s);
+    cell.appendChild(c);
+    const cap = document.createElement("div");
+    const rd = RANKS.filter(r=>r.key===id)[0];
+    cap.textContent = sp.label + (rd ? "  \u00b7  " + rd.need + " XP" : "  \u00b7  0.5 XP");
+    cell.appendChild(cap);
+    el.codexGrid.appendChild(cell);
+  });
+}
+function toggleCodex(){
+  buildCodex();
+  el.codex.classList.toggle("on");
+  if (running) paused = el.codex.classList.contains("on");
+  input.down = false; input.space = false;
+}
+function togglePause(){
+  paused = !paused;
+  showBanner(paused ? "PAUSED" : "", paused ? "press Esc to resume" : "", 1.4);
+  input.down = false; input.space = false;
+}
+
+/* ============================================================
+   UPDATE
+   ============================================================ */
+function update(dt){
+  time += dt;
+
+  /* ---- player ---- */
+  if (player.dead){
+    player.deadT -= dt;
+    if (player.deadT <= 0) respawnPlayer();
+  } else {
+    const wx = input.mx + cam.x;
+    const wy = input.my + cam.y;
+    const dx = wx - player.x, dy = wy - player.y;
+    const d = Math.hypot(dx, dy);
+    const wantBoost = (input.down || input.space) && player.boost > 0.001;
+    if (wantBoost && !player.boosting) Sfx.boostStart();
+    player.boosting = wantBoost;
+    if (wantBoost) player.boost = Math.max(0, player.boost - dt);
+
+    let sp = RANKS[player.rank].speed * (wantBoost ? BOOST_MULT : 1);
+    if (d > 6){
+      const ax = dx/d, ay = dy/d;
+      const accel = 9;
+      player.vx = lerp(player.vx, ax*sp, clamp(accel*dt, 0, 1));
+      player.vy = lerp(player.vy, ay*sp, clamp(accel*dt, 0, 1));
+      if (Math.abs(player.vx) > 4) player.face = player.vx < 0 ? -1 : 1;
+    } else {
+      player.vx = lerp(player.vx, 0, clamp(8*dt, 0, 1));
+      player.vy = lerp(player.vy, 0, clamp(8*dt, 0, 1));
+    }
+    moveEntity(player, dt);
+  }
+
+  /* ---- NPC AI ---- */
+  for (let i=0;i<critters.length;i++){
+    const c = critters[i];
+    if (c.dead){
+      c.deadT -= dt;
+      if (c.deadT <= 0) reviveCritter(c);
+      continue;
+    }
+    c.think -= dt;
+    if (c.think <= 0){
+      c.think = rand(0.35, 0.9);
+      c.target = null; c.state = "wander";
+      let prey = null, preyD = 380*380;
+      let threat = null, threatD = 300*300;
+      for (let j=0;j<critters.length;j++){
+        if (j===i) continue;
+        const o = critters[j];
+        if (o.dead) continue;
+        const d2 = dist2(c.x,c.y,o.x,o.y);
+        if (o.rank < c.rank && d2 < preyD){ preyD = d2; prey = o; }
+        else if (o.rank > c.rank && d2 < threatD){ threatD = d2; threat = o; }
+      }
+      if (prey && (!threat || preyD < threatD*1.4)){ c.state = "hunt"; c.target = prey; }
+      else if (threat){ c.state = "flee"; c.target = threat; }
+    }
+
+    c.wanderT -= dt;
+    if (c.wanderT <= 0){ c.wanderT = rand(1.2, 3.2); c.wanderAng = rand(0, TAU); }
+
+    let ax = Math.cos(c.wanderAng), ay = Math.sin(c.wanderAng);
+    let sp = RANKS[c.rank].speed * 0.62;
+
+    if (c.state === "hunt" && c.target && !c.target.dead){
+      const dx = c.target.x - c.x, dy = c.target.y - c.y, d = Math.hypot(dx,dy) || 1;
+      ax = dx/d; ay = dy/d; sp = RANKS[c.rank].speed;
+      if (Math.abs(dx) > 4) c.face = dx < 0 ? -1 : 1;
+    } else if (c.state === "flee" && c.target && !c.target.dead){
+      const dx = c.x - c.target.x, dy = c.y - c.target.y, d = Math.hypot(dx,dy) || 1;
+      ax = dx/d; ay = dy/d; sp = RANKS[c.rank].speed * 1.25;
+      c.boosting = true;                       // panicking sprint
+    } else {
+      c.boosting = false;
+    }
+    c.vx = lerp(c.vx, ax*sp, clamp(6*dt, 0, 1));
+    c.vy = lerp(c.vy, ay*sp, clamp(6*dt, 0, 1));
+    moveEntity(c, dt);
+  }
+
+  /* ---- food respawn ---- */
+  for (let i=0;i<foods.length;i++){
+    const f = foods[i];
+    if (f.dead){
+      f.respawn -= dt;
+      if (f.respawn <= 0){
+        f.dead = false;
+        f.x = rand(40, WORLD.w-40); f.y = rand(40, WORLD.h-40);
+        f.kind = FOOD_KINDS[randi(0, FOOD_KINDS.length-1)];
+        f.phase = rand(0, TAU);
+      }
+    }
+  }
+
+  /* ---- eating food ---- */
+  if (!player.dead) eatFood(player, dt, true);
+  for (let i=0;i<critters.length;i++){ const c = critters[i]; if (!c.dead) eatFood(c, dt, false); }
+
+  /* ---- combat ---- */
+  resolveCombat();
+
+  /* ---- effects ---- */
+  for (let i=0;i<critters.length;i++){
+    const c = critters[i];
+    if (c.flash > 0) c.flash -= dt;
+    if (c.burst > 0) c.burst -= dt*1.4;
+  }
+  if (!player.dead && player.flash > 0) player.flash -= dt;
+  if (!player.dead && player.burst > 0) player.burst -= dt*1.4;
+  if (player.invuln > 0) player.invuln -= dt;
+
+  /* ---- camera ---- */
+  const tx = clamp(player.x - VW/2, 0, Math.max(0, WORLD.w - VW));
+  const ty = clamp(player.y - VH/2, 0, Math.max(0, WORLD.h - VH));
+  cam.x = lerp(cam.x, tx, clamp(9*dt, 0, 1));
+  cam.y = lerp(cam.y, ty, clamp(9*dt, 0, 1));
+
+  if (bannerT > 0){
+    bannerT -= dt;
+    if (bannerT <= 0){ el.banner.style.display="none"; el.bannerSub.style.display="none"; }
+  }
+  hudTick -= dt;
+  if (hudTick <= 0){ hudTick = 0.06; updateHUD(); }
+}
+
+function moveEntity(e, dt){
+  e.x += e.vx * dt;
+  e.y += e.vy * dt;
+  const m = e.r + 4;
+  if (e.x < m){ e.x = m; e.vx = Math.abs(e.vx)*0.4; }
+  if (e.y < m){ e.y = m; e.vy = Math.abs(e.vy)*0.4; }
+  if (e.x > WORLD.w-m){ e.x = WORLD.w-m; e.vx = -Math.abs(e.vx)*0.4; }
+  if (e.y > WORLD.h-m){ e.y = WORLD.h-m; e.vy = -Math.abs(e.vy)*0.4; }
+  e.wobble += dt * 8;
+}
+
+function eatFood(e, dt, isPlayer){
+  const bite = e.r + e.r * 0.5;
+  for (let i=0;i<foods.length;i++){
+    const f = foods[i];
+    if (f.dead) continue;
+    if (dist2(e.x,e.y,f.x,f.y) > bite*bite) continue;
+    f.dead = true;
+    f.respawn = rand(2, 7);
+    addXP(e, FOOD_XP);
+    refillBoost(e, FOOD_ENERGY);
+    if (isPlayer){
+      e.foodEaten++;
+      Sfx.eat();
+      e.flash = 0.12;
+    }
+  }
+}
+
+function resolveCombat(){
+  for (let i=0;i<critters.length;i++){
+    const a = critters[i];
+    if (a.dead) continue;
+    // player vs NPC
+    if (!player.dead){
+      const rr = a.r + player.r;
+      if (dist2(a.x,a.y,player.x,player.y) < rr*rr){
+        if (a.rank < player.rank)               kill(player, a);
+        else if (a.rank > player.rank && player.invuln <= 0) kill(a, player);
+      }
+    }
+    // NPC vs NPC
+    for (let j=i+1;j<critters.length;j++){
+      const b = critters[j];
+      if (b.dead) continue;
+      const rr = a.r + b.r;
+      if (dist2(a.x,a.y,b.x,b.y) < rr*rr){
+        if (a.rank > b.rank) kill(a, b);
+        else if (b.rank > a.rank) kill(b, a);
+      }
+    }
+  }
+}
+
+function kill(pred, prey){
+  if (prey.dead) return;
+  const gain = prey.xp * KILL_XP_SHARE;
+  prey.dead = true;
+  prey.deadT = pred.isPlayer ? 0.05 : rand(3, 9);
+  prey.vx = prey.vy = 0;
+  prey.flash = 0.2;
+  pred.flash = 0.14;
+  pred.burst = 1;
+
+  if (pred.isPlayer){
+    pred.kills++;
+    addXP(pred, gain);
+    refillBoost(pred, KILL_ENERGY);
+    Sfx.kill();
+    pushFeed("Ate <b style='color:" + RANKS[prey.rank].color + "'>" + RANKS[prey.rank].name +
+             "</b> &nbsp;+" + gain.toFixed(1) + " XP (25%)", "kill");
+  } else if (prey.isPlayer){
+    const kept = player.xp * DEATH_XP_KEEP;
+    addXP(pred, gain);
+    refillBoost(pred, KILL_ENERGY);
+    Sfx.death();
+    player.deaths++;
+    pushFeed("Eaten by <b style='color:" + RANKS[pred.rank].color + "'>" + RANKS[pred.rank].name +
+             "</b> &nbsp;kept " + kept.toFixed(1) + " XP (50%)", "death");
+    player.dead = true;
+    player.deadT = RESPAWN_TIME;
+    player.vx = player.vy = 0;
+    player.xp = kept;
+    el.veil.classList.add("on");
+    showBanner("EATEN!", "Respawning with " + kept.toFixed(1) + " XP in " + RESPAWN_TIME.toFixed(1) + "s", RESPAWN_TIME);
+  }
+}
+
+function respawnPlayer(){
+  let x, y, tries = 0;
+  do {
+    x = rand(80, WORLD.w-80); y = rand(80, WORLD.h-80); tries++;
+    var safe = true;
+    for (let i=0;i<critters.length;i++){
+      const c = critters[i];
+      if (c.dead || c.rank <= player.rank) continue;
+      if (dist2(x,y,c.x,c.y) < SPAWN_CLEAR*SPAWN_CLEAR){ safe = false; break; }
+    }
+  } while (!safe && tries < 40);
+  player.x = x; player.y = y;
+  player.dead = false;
+  player.invuln = SPAWN_SAFE;
+  player.boost = Math.max(player.boost, BOOST_MAX * 0.6);
+  player.vx = player.vy = 0;
+  el.veil.classList.remove("on");
+  cam.x = clamp(x - VW/2, 0, Math.max(0, WORLD.w - VW));
+  cam.y = clamp(y - VH/2, 0, Math.max(0, WORLD.h - VH));
+  showBanner("BACK IN THE FOOD CHAIN", "Spawn shield up for " + SPAWN_SAFE.toFixed(1) + "s", 1.6);
+}
+
+function reviveCritter(c){
+  c.dead = false;
+  c.x = rand(70, WORLD.w-70);
+  c.y = rand(70, WORLD.h-70);
+  c.vx = c.vy = 0;
+  c.xp = 0;
+  c.boost = BOOST_MAX;
+  c.flash = 0; c.burst = 0; c.boosting = false;
+  c.state = "wander"; c.target = null;
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function render(){
+  ctx.clearRect(0,0,VW,VH);
+
+  // map backdrop
+  ctx.fillStyle = "#0a1826";
+  ctx.fillRect(0,0,VW,VH);
+  const gx = Math.floor(cam.x/100)*100, gy = Math.floor(cam.y/100)*100;
+  ctx.strokeStyle = "rgba(90,160,220,.055)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x=gx; x < cam.x+VW+100; x+=100){ const sx = Math.round(x-cam.x)+.5; ctx.moveTo(sx,0); ctx.lineTo(sx,VH); }
+  for (let y=gy; y < cam.y+VH+100; y+=100){ const sy = Math.round(y-cam.y)+.5; ctx.moveTo(0,sy); ctx.lineTo(VW,sy); }
+  ctx.stroke();
+
+  // world border
+  ctx.strokeStyle = "rgba(90,209,255,.3)";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(1.5-cam.x, 1.5-cam.y, WORLD.w, WORLD.h);
+
+  ctx.save();
+  ctx.translate(-Math.round(cam.x), -Math.round(cam.y));
+
+  const pad = 90;
+  const view = { x0:cam.x-pad, y0:cam.y-pad, x1:cam.x+VW+pad, y1:cam.y+VH+pad };
+
+  // ---- food ----
+  for (let i=0;i<foods.length;i++){
+    const f = foods[i];
+    if (f.dead) continue;
+    if (f.x < view.x0 || f.x > view.x1 || f.y < view.y0 || f.y > view.y1) continue;
+    const bob = Math.sin(time*2.4 + f.phase) * 1.6;
+    ctx.globalAlpha = 0.13;
+    ctx.fillStyle = "#9fe8b0";
+    ctx.beginPath(); ctx.ellipse(f.x, f.y + 7, 6, 2.5, 0, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    drawSprite(ctx, SPRITES[f.kind], f.x, f.y + bob, false, 0.95, FOOD_SCALE);
+  }
+
+  // ---- critters ----
+  for (let i=0;i<critters.length;i++) drawCritter(critters[i], view, false);
+
+  if (!player.dead || (player.dead && player.deadT > RESPAWN_TIME - 0.35)) drawCritter(player, view, true);
+
+  ctx.restore();
+
+  drawCursor();
+  drawMinimap();
+}
+
+function drawCritter(e, view, isP){
+  if (e.x < view.x0 || e.x > view.x1 || e.y < view.y0 || e.y > view.y1) return;
+  const sp = SPRITES[RANKS[e.rank].key];
+  const bob = Math.sin(e.wobble) * (e.boosting ? 2.6 : 1.2);
+  const cx = e.x, cy = e.y + bob;
+
+  // shadow
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.ellipse(e.x, e.y + sp.h*SCALE*0.42, sp.w*SCALE*0.34, sp.h*SCALE*0.10, 0, 0, TAU);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // evolve / eat burst
+  if (e.burst > 0){
+    ctx.globalAlpha = e.burst * 0.5;
+    ctx.strokeStyle = RANKS[e.rank].color;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(e.x, e.y, (1-e.burst)*sp.w*SCALE*0.9 + 6, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // rank aura ring
+  if (isP){
+    const rr = sp.w*SCALE*0.46;
+    if (e.invuln > 0){
+      // spawn shield: flickering white halo
+      ctx.strokeStyle = "rgba(255,255,255," + (0.35 + 0.35*Math.sin(time*14)) + ")";
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(e.x, e.y, rr + 5, 0, TAU); ctx.stroke();
+      ctx.fillStyle = "rgba(200,230,255,.10)";
+      ctx.beginPath(); ctx.arc(e.x, e.y, rr, 0, TAU); ctx.fill();
+    } else {
+      ctx.strokeStyle = "rgba(90,209,255,.55)";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(e.x, e.y, rr + Math.sin(time*3)*1.5, 0, TAU); ctx.stroke();
+      if (e.boosting){
+        ctx.strokeStyle = "rgba(255,200,80,.85)";
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(e.x, e.y, rr + 6, 0, TAU); ctx.stroke();
+      }
+    }
+  }
+
+  if (e.flash > 0) ctx.globalAlpha = clamp(e.flash*4, 0, 1);
+  drawSprite(ctx, sp, cx, cy, e.face < 0, e.flash > 0 ? clamp(e.flash*4,0,1) : 1);
+  ctx.globalAlpha = 1;
+
+  // nameplate
+  const showName = isP || Math.abs(e.x-player.x) < 320 && Math.abs(e.y-player.y) < 320;
+  if (showName && !e.dead){
+    const ty = e.y - sp.h*SCALE*0.5 - 9;
+    ctx.font = "600 11px ui-monospace,monospace";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(0,0,0,.55)";
+    const tw = ctx.measureText(e.label).width;
+    ctx.fillRect(e.x - tw/2 - 5, ty - 11, tw + 10, 15);
+    ctx.fillStyle = isP ? "#eaf7ff" : RANKS[e.rank].color;
+    ctx.fillText(e.label, e.x, ty);
+    ctx.textAlign = "left";
+  }
+}
+
+function drawCursor(){
+  const x = input.mx, y = input.my;
+  const boosting = player && !player.dead && (input.down || input.space) && player.boost > 0.001;
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = boosting ? "rgba(255,200,80,.95)" : "rgba(120,220,255,.85)";
+  ctx.beginPath(); ctx.arc(x, y, boosting ? 12 : 9, 0, TAU); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x-14,y); ctx.lineTo(x-6,y);
+  ctx.moveTo(x+6,y);  ctx.lineTo(x+14,y);
+  ctx.moveTo(x,y-14); ctx.lineTo(x,y-6);
+  ctx.moveTo(x,y+6);  ctx.lineTo(x,y+14);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawMinimap(){
+  const g = el.mini.getContext("2d");
+  const mw = el.mini.width, mh = el.mini.height;
+  const sx = mw / WORLD.w, sy = mh / WORLD.h;
+  g.clearRect(0,0,mw,mh);
+  g.fillStyle = "rgba(20,50,80,.45)";
+  g.fillRect(0,0,mw,mh);
+  g.strokeStyle = "rgba(120,190,255,.25)";
+  g.strokeRect(.5,.5,mw-1,mh-1);
+
+  for (let i=0;i<critters.length;i++){
+    const c = critters[i];
+    if (c.dead) continue;
+    g.fillStyle = RANKS[c.rank].color;
+    g.globalAlpha = 0.75;
+    g.fillRect(c.x*sx-1, c.y*sy-1, 2, 2);
+  }
+  g.globalAlpha = 1;
+  g.fillStyle = "#fff";
+  g.fillRect(player.x*sx-2, player.y*sy-2, 4, 4);
+  const vw = VW*sx, vh = VH*sy;
+  g.strokeRect(clamp(cam.x*sx,0,mw), clamp(cam.y*sy,0,mh), Math.min(vw,mw), Math.min(vh,mh));
+}
+
+/* ============================================================
+   LOOP + START
+   ============================================================ */
+let last = 0;
+function frame(ts){
+  requestAnimationFrame(frame);
+  if (!last) last = ts;
+  let dt = (ts - last)/1000; last = ts;
+  if (dt > 0.05) dt = 0.05;
+  if (running && !paused) update(dt);
+  render();
+}
+requestAnimationFrame(frame);
+
+function startGame(){
+  if (running) return;
+  Sfx.init();
+  document.getElementById("start").style.display = "none";
+  running = true;
+  showBanner("YOU ARE PLANKTON", "Eat green food. Hold click or Space to boost.", 2.6);
+}
+
+/** Wipe the world and start the player over at Plankton. */
+function restart(){
+  initWorld();
+  el.feed.innerHTML = "";
+  el.veil.classList.remove("on");
+  el.banner.style.display = "none";
+  el.bannerSub.style.display = "none";
+  bannerT = 0;
+  lastPortraitRank = -1;
+  input.down = false; input.space = false;
+  updateHUD();
+  showBanner("NEW LIFE", "You are Plankton again. Good luck.", 2.0);
+}
+
+document.getElementById("go").addEventListener("click", startGame);
+cv.addEventListener("pointerdown", () => { if (!running) startGame(); });
+
+/* Small handle so the game can be inspected/tested from the console or a
+   headless harness. Read-only apart from the explicit helper functions. */
+window.EvoQuest = {
+  RANKS: RANKS, BOOST_MAX: BOOST_MAX, FOOD_XP: FOOD_XP,
+  KILL_XP_SHARE: KILL_XP_SHARE, DEATH_XP_KEEP: DEATH_XP_KEEP,
+  get player(){ return player; },
+  get critters(){ return critters; },
+  get foods(){ return foods; },
+  get sprites(){ return SPRITES; },
+  get running(){ return running; },
+  get input(){ return input; },
+  start: startGame,
+  restart: restart,
+  step: update,
+  setPaused: function(v){ paused = !!v; },
+  spawnFoodAt: spawnFood,
+  addXP: addXP,
+  kill: kill
+};
+
+initWorld();
+updateHUD();
+})();
+</script>
+</body>
+</html>
