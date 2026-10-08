@@ -41,6 +41,42 @@ needed.
 | `R` | Restart as Plankton |
 | `Esc` | Pause (closes the guide first if it is open) |
 
+## Multiplayer
+
+The box in the top-right. Type a code and press **Host** or **Join**.
+
+**Architecture: peer-to-peer, host authoritative.** One player hosts the world —
+their browser runs the simulation for everyone — and the others connect straight
+to them. There is no server, no account and no API key.
+
+This is forced by the deployment target: **GitHub Pages can only serve static
+files**, so it cannot run a game server. The host player's machine is the server.
+
+| | |
+|---|---|
+| Room codes | letters and digits, up to 18 characters |
+| Host | runs the world, decides every kill, sees a player count |
+| Client | sends its cursor at 20Hz, receives world snapshots at 15Hz |
+| Players | ~8 is comfortable; each one is one full world simulation |
+
+**Single-player is completely untouched.** If you never press Host or Join,
+nothing is loaded and nothing is sent — the game still runs from `file://` with
+no network at all. PeerJS is fetched lazily from a CDN *only* at the moment you
+go online, which is the one and only time the game touches the network.
+
+How it stays cheap: the 1300-piece food field and the AI roster are generated
+from a **shared random seed**, so both sides build an identical world without
+transferring a single coordinate. Only AI positions (a flat number array), other
+players, and food removals/respawns travel over the wire.
+
+Rules apply between players exactly as between creatures: eat anything below
+your rank, and any higher rank can eat you — including the **0.6s wind-up**
+warning and the 50%-of-lifetime-XP death penalty. PvP kills pay **30% of the
+victim's lifetime XP** and 60% of your boost meter.
+
+Not built: dedicated servers, accounts, matchmaking, host migration if the host
+quits, and lag compensation. The host is trusted — it could cheat.
+
 ## The view
 
 Your creature is **always dead centre** of the screen and the camera never drifts
@@ -180,6 +216,9 @@ deploy the game. None of it ships inside `index.html`.
 # 87 assertions covering the rules, plus balance simulations
 node tools\headless-test.mjs
 
+# 37 assertions: two real game instances talking over a loopback transport
+node tools\multiplayer-test.mjs
+
 # measure deaths/progression with and without reacting to warnings
 node tools\death-diagnostic.mjs
 
@@ -219,6 +258,7 @@ tools/
   sprite-widths.ps1     per-row width audit
   harness.mjs           DOM stub + software canvas + PNG encoder
   headless-test.mjs     rule, AI and balance tests
+  multiplayer-test.mjs  two peers, join/snapshot/PvP/food-credit/leaving
   death-diagnostic.mjs  deaths/progression measurement over many runs
   kill-payout-probe.mjs creature lifetime XP growth and kill payout scaling
   snapshot.mjs          render game frames to PNG

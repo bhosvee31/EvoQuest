@@ -134,6 +134,23 @@
     background:linear-gradient(90deg,#5ad1ff,#7ef0b4);box-shadow:0 8px 26px rgba(90,209,255,.32);}
   #go:hover{filter:brightness(1.1);}
   .tiny{font-size:10px;color:var(--dim);margin-top:16px;}
+
+  /* ---------- lobby ---------- */
+  #lobby{position:fixed;right:12px;top:12px;z-index:6;width:206px;padding:10px 11px;}
+  #lobby h4{margin:0 0 8px;font-size:9.5px;letter-spacing:1.4px;color:var(--dim);font-weight:600;}
+  #lobby input{pointer-events:auto;width:100%;box-sizing:border-box;font:inherit;font-size:11px;
+    padding:5px 7px;margin-bottom:6px;border-radius:6px;color:var(--ink);
+    background:rgba(0,0,0,.4);border:1px solid var(--line);text-transform:uppercase;}
+  #lobby input:focus{outline:none;border-color:rgba(90,209,255,.6);}
+  .lrow{display:flex;gap:6px;margin-bottom:6px;}
+  .lbtn{pointer-events:auto;cursor:pointer;flex:1;font:inherit;font-size:11px;font-weight:600;
+    padding:6px 4px;border-radius:6px;border:1px solid var(--line);color:var(--ink);
+    background:rgba(90,209,255,.14);}
+  .lbtn:hover{background:rgba(90,209,255,.28);}
+  .lbtn.warn{background:rgba(255,90,110,.16);border-color:rgba(255,90,110,.4);}
+  #netStatus{font-size:9.5px;color:var(--dim);min-height:13px;line-height:1.35;}
+  #netPeers{font-size:9.5px;color:var(--dim);margin-top:4px;line-height:1.5;}
+  #netPeers b{color:#bfe3ff;}
 </style>
 </head>
 <body>
@@ -141,6 +158,18 @@
 <canvas id="game"></canvas>
 
 <div id="hud">
+  <div id="lobby" class="panel">
+    <h4>MULTIPLAYER</h4>
+    <input id="roomIn" maxlength="18" placeholder="ROOM CODE" spellcheck="false">
+    <div class="lrow">
+      <button class="lbtn" id="btnHost">Host</button>
+      <button class="lbtn" id="btnJoin">Join</button>
+    </div>
+    <button class="lbtn warn" id="btnLeave" style="width:100%;display:none">Leave</button>
+    <div id="netStatus"></div>
+    <div id="netPeers"></div>
+  </div>
+
   <div id="card" class="panel">
     <canvas id="portrait" width="112" height="112"></canvas>
     <div class="grow">
@@ -568,8 +597,6 @@ const FOOD_KINDS = ["algae","berry","krill","mushroom"];
 const FOOD_LABEL = { algae:"Algae", berry:"Berries", krill:"Krill", mushroom:"Mushroom" };
 
 const TAU = Math.PI * 2;
-const rand  = (a,b)=> a + Math.random()*(b-a);
-const randi = (a,b)=> Math.floor(rand(a,b+1));
 const clamp = (v,a,b)=> v<a?a:(v>b?b:v);
 const lerp  = (a,b,t)=> a + (b-a)*t;
 const dist2 = (ax,ay,bx,by)=>{ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; };
@@ -671,9 +698,364 @@ const Sfx = {
 };
 
 /* ============================================================
-   WORLD STATE
+   NETWORK  (peer-to-peer, host authoritative)
+   ------------------------------------------------------------
+   GitHub Pages cannot run a game server, so one player hosts the
+   simulation and everyone else connects straight to them. There are
+   no accounts and no backend.
+
+   Offline play never touches any of this: Net.mode stays "offline"
+   and PeerJS is only fetched if you actually host or join.
    ============================================================ */
+const NET_CFG = {
+  tickHz: 15,          // snapshots per second
+  inputHz: 20,         // client -> host input rate
+  peerLib: "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js",
+  openPeer: { debug: 0 }
+};
+
+/* Deterministic PRNG so every peer generates an identical world. */
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let seeded = null;                       // active PRNG, null = Math.random
+function rand(a, b){
+  const r = seeded ? seeded() : Math.random();
+  return a + r * (b - a);
+}
+function randi(a, b){ return Math.floor(rand(a, b + 1)); }
+
+const Net = {
+  mode: "offline",      // "offline" | "host" | "client"
+  id: 0,
+  seed: 0,
+  name: "",
+  conn: null,           // active transport (null when offline)
+  peers: new Map(),     // id -> remote player object (host side)
+  snapshots: new Map(), // id -> last snapshot (client side)
+  lastSnapAt: 0,
+  snapAcc: 0,
+  inputAcc: 0,
+  ready: false,
+  hostId: 0,
+  libPromise: null,
+  foodGone: [],       // food ids eaten this frame
+  foodAdded: [],     // food that respawned this frame
+  fed: [],           // remote players who ate, so their client can be credited
+
+  isNet(){ return this.mode !== "offline"; },
+  isHost(){ return this.mode === "host" || this.mode === "offline"; },
+
+  setStatus(msg){ const n = document.getElementById("netStatus"); if (n) n.textContent = msg || ""; },
+
+  /* --- transport factory ------------------------------------- */
+  /* PeerJS gives us room codes and direct DataChannels between peers. */
+  async loadLib(){
+    if (window.Peer) return window.Peer;
+    if (this.libPromise) return this.libPromise;
+    this.libPromise = new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = NET_CFG.peerLib;
+      s.onload = () => res(window.Peer);
+      s.onerror = () => rej(new Error("could not load the peer library (offline?)"));
+      document.head.appendChild(s);
+    });
+    return this.libPromise;
+  },
+
+  /* wraps a PeerJS DataConnection in a tiny send/onMessage interface, so the
+     game never talks to the transport directly and tests can swap in a loopback */
+  wrap(dc){
+    return {
+      open: () => new Promise(r => dc.on("open", r)),
+      send: (obj) => { try { if (dc.open) dc.send(obj); } catch(e){} },
+      close: () => { try { dc.close(); } catch(e){} },
+      onMessage: (cb) => dc.on("data", d => cb(d)),
+      onClose:   (cb) => dc.on("close", cb),
+      onError:   (cb) => dc.on("error", cb)
+    };
+  },
+
+  async host(room){
+    this.setStatus("connecting...");
+    const P = await this.loadLib();
+    const id = cleanRoom(room) || "evoquest";
+    const peer = new P(id, NET_CFG.openPeer);
+    this.seed = (Math.random() * 0xffffffff) >>> 0;
+    this.id = 0;
+    this.mode = "host";
+    this.peerRef = peer;
+
+    await new Promise((res, rej) => {
+      peer.on("open", id2 => { this.peerId = id2; res(); });
+      peer.on("error", e => rej(e));
+      setTimeout(() => rej(new Error("room code in use, or server unreachable")), 12000);
+    });
+
+    peer.on("connection", dc => this.acceptPeer(dc));
+    this.setStatus("hosting room " + cleanRoom(room).toUpperCase());
+    return cleanRoom(room).toUpperCase();
+  },
+
+  acceptPeer(dc){
+    const t = this.wrap(dc);
+    this.conns = this.conns || new Map();
+    this.conns.set(t, true);
+    t.onMessage(msg => this.onMessage(msg, t));
+    t.onClose(() => this.dropPeer(t));
+    t.onError(() => this.dropPeer(t));
+    t.open().then(() => {
+      const id = ++this.nextId;
+      t.peerId = id;
+      this.peers.set(id, {
+        isPlayer: true, isNet: true, id: id, name: "Player " + id,
+        rank: 0, xp: 0, totalXp: 0, x: WORLD.w / 2, y: WORLD.h / 2,
+        vx: 0, vy: 0, r: 20, face: 1, wobble: 0, boost: BOOST_MAX,
+        boosting: false, invuln: SPAWN_SAFE, huntedBy: null, strikeT: 0,
+        burst: 0, flash: 0, dead: false, deadT: 0, state: "wander",
+        target: null, think: 99, wanderAng: 0, wanderT: 99,
+        kills: 0, deaths: 0, foodEaten: 0, bestRank: 0, label: "Player " + id,
+        input: { x: WORLD.w / 2, y: WORLD.h / 2, b: false }
+      });
+      t.send({ t: "welcome", id: id, seed: this.seed, hostId: this.id });
+      pushFeed("Player " + id + " joined the arena", "");
+    }).catch(() => this.dropPeer(t));
+  },
+
+  dropPeer(t){
+    this.conns = this.conns || new Map();
+    for (const [id, p] of this.peers){
+      if (p.conn === t){ this.peers.delete(id); pushFeed(p.name + " left", "death"); }
+    }
+    this.conns.delete(t);
+    t.close();
+  },
+
+  async join(room){
+    this.setStatus("connecting...");
+    const P = await this.loadLib();
+    const id = cleanRoom(room);
+    if (!id) throw new Error("room code required");
+    const peer = new P({ debug: 0, reliable: true });
+    this.mode = "client";
+    this.peerRef = peer;
+    this.conn = await new Promise((res, rej) => {
+      const to = setTimeout(() => rej(new Error("no host found for room " + id.toUpperCase())), 12000);
+      peer.on("open", () => {
+        const dc = peer.connect(id, { reliable: true });
+        dc.on("open", () => { clearTimeout(to); res(this.wrap(dc)); });
+        dc.on("error", e => { clearTimeout(to); rej(e); });
+      });
+      peer.on("error", e => { clearTimeout(to); rej(e); });
+    });
+    const t = this.conn;
+    t.onMessage(msg => this.onMessage(msg, null));
+    t.onClose(() => { this.setStatus("disconnected"); this.mode = "offline"; });
+    t.onError(() => {});
+    this.setStatus("connected to " + id.toUpperCase());
+    return id.toUpperCase();
+  },
+
+  broadcast(obj){ (this.conns || new Map()).forEach((_, t) => t.send(obj)); },
+
+  onMessage(msg, from){
+    if (!msg || typeof msg !== "object") return;
+    if (NetHooks[msg.t]) NetHooks[msg.t](msg, from);
+  },
+
+  leave(){
+    try { this.conn && this.conn.close(); } catch(e){}
+    try { this.peerRef && this.peerRef.destroy(); } catch(e){}
+    this.conn = null; this.peerRef = null;
+    this.peers.clear(); this.snapshots.clear();
+    this.conns = new Map();
+    this.mode = "offline";
+    this.setStatus("");
+    toast("Back to single player");
+  },
+
+  /* Host -> everyone, at NET_CFG.tickHz */
+  sendSnapshot(){
+    const t = performance.now();
+    if (t - this.lastSnapAt < 1000 / NET_CFG.tickHz) return;
+    this.lastSnapAt = t;
+    if (this.mode !== "host") return;
+    const ai = [];
+    for (let i = 0; i < critters.length; i++){
+      const c = critters[i];
+      if (c.isNet || c.dead) continue;
+      ai.push(c.id, c.rank, Math.round(c.x), Math.round(c.y), c.face);
+    }
+    const pl = [];
+    pl.push(0, player.rank, Math.round(player.x), Math.round(player.y), player.face,
+            player.dead ? 1 : 0);
+    this.peers.forEach(p => {
+      pl.push(p.id, p.rank, Math.round(p.x), Math.round(p.y), p.face, p.dead ? 1 : 0);
+    });
+    this.broadcast({ t: "snap", ai: ai, pl: pl, n: critters.filter(c => !c.dead && !c.isNet).length });
+  },
+
+  /* Client -> host */
+  sendInput(){
+    const t = performance.now();
+    if (t - this.inputAcc < 1000 / NET_CFG.inputHz) return;
+    this.inputAcc = t;
+    if (this.mode !== "client" || !this.conn) return;
+    this.conn.send({ t: "in", x: Math.round(input.mx + cam.x), y: Math.round(input.my + cam.y),
+                     b: !!(input.down || input.space), r: player.rank });
+  }
+};
+
+function cleanRoom(s){
+  return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 18);
+}
+
+/* Message handlers. Split out so the test harness can drive them directly. */
+const NetHooks = {
+  welcome(msg, from){
+    Net.id = msg.id;
+    Net.seed = msg.seed;
+    Net.hostId = msg.hostId;
+    Net.ready = true;
+    rebuildWorldFromSeed(msg.seed);
+  },
+  in(msg, from){
+    if (Net.mode !== "host") return;
+    const p = from && from.peerId ? Net.peers.get(from.peerId) : null;
+    if (!p) return;
+    p.input.x = msg.x; p.input.y = msg.y; p.input.b = msg.b;
+    if (typeof msg.r === "number") p.wantRank = msg.r;
+  },
+  snap(msg){
+    if (Net.mode !== "client") return;
+    applySnapshot(msg);
+  },
+  food(msg){
+    if (Net.mode !== "client") return;
+    for (const id of msg.gone) if (foods[id]) foods[id].dead = true;
+    for (const f of msg.add) foods[f.id] = { id: f.id, x: f.x, y: f.y, kind: f.kind,
+                                             phase: Math.random() * TAU, dead: false, respawn: 0 };
+  },
+  kill(msg){
+    if (Net.mode !== "client") return;
+    if (msg.prey === Net.id){
+      player.dead = true;
+      player.deadT = RESPAWN_TIME;
+      player.deaths++;
+      player.xp *= DEATH_XP_KEEP;
+      player.totalXp *= DEATH_XP_KEEP;
+      player.vx = player.vy = 0;
+      el.veil.classList.add("on");
+      showBanner("EATEN by " + msg.by, "Respawning in " + RESPAWN_TIME.toFixed(1) + "s", RESPAWN_TIME);
+      pushFeed("Eaten by <b>" + msg.by + "</b> in the arena", "death");
+    } else if (msg.killer === Net.id){
+      player.kills++;
+      addXP(player, msg.gain);
+      refillBoost(player, KILL_ENERGY);
+      pushFeed("Ate <b>" + msg.victim + "</b> &nbsp;+" + msg.gain.toFixed(1) + " XP", "kill");
+    }
+  },
+  fed(msg){
+    if (Net.mode !== "client") return;
+    for (const f of msg.who || []){
+      if (f.id !== Net.id) continue;
+      addXP(player, f.n * FOOD_XP);
+      refillBoost(player, f.n * FOOD_ENERGY);
+      player.foodEaten += f.n;
+    }
+  },
+  bye(){ Net.setStatus("host left"); }
+};
+
+/* Clients rebuild the AI from the host's flat snapshot. */
+function applySnapshot(msg){
+  const ai = msg.ai || [], pl = msg.pl || [];
+  const live = new Map();
+  for (let i = 0; i + 4 < ai.length; i += 5){
+    const id = ai[i];
+    live.set(id, { id: id, rank: ai[i+1], x: ai[i+2], y: ai[i+3], face: ai[i+4] });
+  }
+  // reuse existing objects so render() does not churn
+  critters.length = 0;
+  for (const v of live.values()){
+    let c = Net.snapshots.get(v.id);
+    if (!c){
+      const sp = SPRITES[RANKS[v.rank].key];
+      c = { isPlayer: false, isNet: true, id: v.id, rank: v.rank, xp: 0, totalXp: 0,
+            x: v.x, y: v.y, vx: 0, vy: 0, r: sp.w * SCALE * 0.34, face: v.face, wobble: 0,
+            boost: 0, boosting: false, invuln: 0, huntedBy: null, strikeT: 0, burst: 0, flash: 0,
+            dead: false, deadT: 0, state: "wander", target: null, think: 99,
+            wanderAng: 0, wanderT: 99, kills: 0, deaths: 0, foodEaten: 0,
+            bestRank: v.rank, label: RANKS[v.rank].name, remote: true };
+      Net.snapshots.set(v.id, c);
+    }
+    c.rank = v.rank; c.x = v.x; c.y = v.y; c.face = v.face; c.label = RANKS[v.rank].name;
+    const sp = SPRITES[RANKS[v.rank].key];
+    c.r = sp.w * SCALE * 0.34;
+    c.wobble += 0.2;
+    critters.push(c);
+  }
+
+  // remote players: index 0 is the host, the rest are other clients
+  for (let i = 0; i + 5 < pl.length; i += 6){
+    const id = pl[i];
+    if (id === 0){
+      player.x = pl[i+2]; player.y = pl[i+3];
+      if (pl[i+5]) player.dead = true;
+      continue;
+    }
+    let c = Net.snapshots.get(10000 + id);
+    if (!c){
+      c = { isPlayer: true, isNet: true, id: id, name: "Player " + id, rank: pl[i+1],
+            xp: 0, totalXp: 0, x: pl[i+2], y: pl[i+3], vx: 0, vy: 0, r: 20, face: pl[i+4],
+            wobble: 0, boost: 0, boosting: false, invuln: 0, huntedBy: null, strikeT: 0,
+            burst: 0, flash: 0, dead: !!pl[i+5], deadT: 0, state: "wander", target: null,
+            think: 99, wanderAng: 0, wanderT: 99, kills: 0, deaths: 0, foodEaten: 0,
+            bestRank: pl[i+1], label: "Player " + id, remote: true };
+      Net.snapshots.set(10000 + id, c);
+    }
+    c.rank = pl[i+1]; c.x = pl[i+2]; c.y = pl[i+3]; c.face = pl[i+4]; c.dead = !!pl[i+5];
+    c.label = c.name; c.wobble += 0.2;
+    const sp = SPRITES[RANKS[c.rank].key];
+    c.r = sp.w * SCALE * 0.34;
+    critters.push(c);
+  }
+}
+
+/* Deterministic world so every peer starts identical without sending 1300 food
+   positions. Runtime randomness stays host-side and is messaged instead. */
+function rebuildWorldFromSeed(seed){
+  seeded = mulberry32(seed);
+  idCounter = 0;
+  critterSeq = 0;
+  initWorld();
+  seeded = null;
+  for (let i = 0; i < foods.length; i++) foods[i].id = i;
+  Net.foodGone = []; Net.foodAdded = [];
+}
+
+/* Food is seeded identically on every peer, so only removals and new spawns
+   need to travel over the wire. Batched once per frame, not per pickup. */
+function flushFoodEvents(){
+  if (Net.mode !== "host"){ Net.foodGone.length = 0; Net.foodAdded.length = 0; Net.fed.length = 0; return; }
+  if (!Net.foodGone.length && !Net.foodAdded.length && !Net.fed.length) return;
+  if (Net.foodGone.length || Net.foodAdded.length)
+    Net.broadcast({ t: "food", gone: Net.foodGone, add: Net.foodAdded });
+  if (Net.fed.length)
+    Net.broadcast({ t: "fed", who: Net.fed });
+  Net.foodGone.length = 0;
+  Net.foodAdded.length = 0;
+  Net.fed.length = 0;
+}
+
 let foods = [], critters = [], player = null;
+let critterSeq = 0;
 let cam = { x:0, y:0 };
 let time = 0, running = false, paused = false;
 let hudTick = 0;
@@ -681,7 +1063,9 @@ let hudTick = 0;
 function makeCritter(rank, x, y, isPlayer){
   const sp = SPRITES[RANKS[rank].key];
   return {
+    id: ++critterSeq,
     isPlayer: !!isPlayer,
+    isNet: false,
     rank: rank,
     xp: 0,
     x: x, y: y,
@@ -706,10 +1090,12 @@ function makeCritter(rank, x, y, isPlayer){
   };
 }
 
-function spawnFood(x, y, kind){
-  return { x:x, y:y, kind: kind || FOOD_KINDS[randi(0, FOOD_KINDS.length-1)],
+function spawnFood(x, y, kind, id){
+  return { id: id === undefined ? idCounter++ : id,
+           x:x, y:y, kind: kind || FOOD_KINDS[randi(0, FOOD_KINDS.length-1)],
            phase: rand(0, TAU), dead: false, respawn: 0 };
 }
+let idCounter = 0;
 
 function initWorld(){
   foods = [];
@@ -835,6 +1221,53 @@ function downloadSelf(){
   }
 }
 document.getElementById("dlLink").addEventListener("click", downloadSelf);
+
+/* ---------------------------------------------------------- lobby wiring */
+const ui = {
+  roomIn:  document.getElementById("roomIn"),
+  btnHost: document.getElementById("btnHost"),
+  btnJoin: document.getElementById("btnJoin"),
+  btnLeave:document.getElementById("btnLeave"),
+  netPeers:document.getElementById("netPeers")
+};
+
+function setLobbyState(){
+  const net = Net.mode;
+  ui.btnLeave.style.display = net === "offline" ? "none" : "block";
+  ui.btnHost.disabled = net !== "offline";
+  ui.btnJoin.disabled = net !== "offline";
+  ui.roomIn.disabled = net !== "offline";
+  if (net === "offline"){
+    ui.netPeers.textContent = "Play alone, or host a room.";
+  } else if (net === "host"){
+    ui.netPeers.innerHTML = "You are hosting. Share the room code.<br>" +
+      "Players: <b>" + (Net.peers.size + 1) + "</b>";
+  } else {
+    ui.netPeers.textContent = "Connected. The host runs the world.";
+  }
+}
+
+ui.btnHost.addEventListener("click", async () => {
+  const code = cleanRoom(ui.roomIn.value) || "evoquest";
+  try {
+    await Net.host(code);
+    ui.roomIn.value = code.toUpperCase();
+    showBanner("HOSTING " + code.toUpperCase(), "Share the code so friends can join", 2.5);
+    startGame();
+  } catch (e){ Net.setStatus(e.message); toast("Host failed"); }
+  setLobbyState();
+});
+ui.btnJoin.addEventListener("click", async () => {
+  const code = cleanRoom(ui.roomIn.value);
+  if (!code){ Net.setStatus("type a room code first"); return; }
+  try {
+    await Net.join(code);
+    showBanner("JOINING " + code.toUpperCase(), "Waiting for the host's world", 2.5);
+    startGame();
+  } catch (e){ Net.setStatus(e.message); Net.mode = "offline"; toast("Join failed"); }
+  setLobbyState();
+});
+ui.btnLeave.addEventListener("click", () => { Net.leave(); setLobbyState(); });
 
 /* ============================================================
    HUD
@@ -1015,9 +1448,41 @@ function update(dt){
     moveEntity(player, dt);
   }
 
+  /* ---- camera: always dead centre on YOUR creature, host or client ---- */
+  cam.x = player.x - VW/2;
+  cam.y = player.y - VH/2;
+
+  /* ---- clients send their input; hosts simulate everything below ---- */
+  if (Net.mode === "client"){
+    Net.sendInput();
+    if (bannerT > 0){ bannerT -= dt; if (bannerT <= 0){ el.banner.style.display="none"; el.bannerSub.style.display="none"; } }
+    hudTick -= dt; if (hudTick <= 0){ hudTick = 0.06; updateHUD(); }
+    return;                       // no AI, no food, no combat authority
+  }
+
+  /* ---- drive remote players from their network input (host only) ---- */
+  Net.peers.forEach(p => {
+    if (p.dead){ p.deadT -= dt; if (p.deadT <= 0) p.dead = false; return; }
+    const dx = p.input.x - p.x, dy = p.input.y - p.y;
+    const d = Math.hypot(dx, dy);
+    p.boosting = !!p.input.b && p.boost > 0.001;
+    if (p.boosting) p.boost = Math.max(0, p.boost - dt);
+    const sp = RANKS[p.rank].speed * (p.boosting ? BOOST_MULT : 1);
+    if (d > 6){
+      p.vx = lerp(p.vx, dx/d*sp, clamp(9*dt, 0, 1));
+      p.vy = lerp(p.vy, dy/d*sp, clamp(9*dt, 0, 1));
+      if (Math.abs(p.vx) > 4) p.face = p.vx < 0 ? -1 : 1;
+    } else {
+      p.vx = lerp(p.vx, 0, clamp(8*dt, 0, 1));
+      p.vy = lerp(p.vy, 0, clamp(8*dt, 0, 1));
+    }
+    moveEntity(p, dt);
+  });
+
   /* ---- NPC AI ---- */
   for (let i=0;i<critters.length;i++){
     const c = critters[i];
+    if (c.isNet) continue;              // remote players are driven above
     if (c.dead){
       c.deadT -= dt;
       if (c.deadT <= 0) reviveCritter(c);
@@ -1088,13 +1553,17 @@ function update(dt){
         f.x = rand(40, WORLD.w-40); f.y = rand(40, WORLD.h-40);
         f.kind = FOOD_KINDS[randi(0, FOOD_KINDS.length-1)];
         f.phase = rand(0, TAU);
+        if (f.id !== undefined) Net.foodAdded.push({ id: f.id, x: Math.round(f.x), y: Math.round(f.y), kind: f.kind });
       }
     }
   }
+  flushFoodEvents();
 
   /* ---- eating food ---- */
   if (!player.dead) eatFood(player, dt, true);
   for (let i=0;i<critters.length;i++){ const c = critters[i]; if (!c.dead) eatFood(c, dt, false); }
+  Net.peers.forEach(p => { if (!p.dead) eatFood(p, dt, false); });
+  flushFoodEvents();
 
   /* ---- combat ---- */
   resolveCombat(dt);
@@ -1115,6 +1584,8 @@ function update(dt){
     player.huntedBy = best;
   }
 
+  Net.sendSnapshot();
+
   /* ---- effects ---- */
   for (let i=0;i<critters.length;i++){
     const c = critters[i];
@@ -1124,10 +1595,6 @@ function update(dt){
   if (!player.dead && player.flash > 0) player.flash -= dt;
   if (!player.dead && player.burst > 0) player.burst -= dt*1.4;
   if (player.invuln > 0) player.invuln -= dt;
-
-  /* ---- camera: the player is always dead centre, no lerp, no clamping ---- */
-  cam.x = player.x - VW/2;
-  cam.y = player.y - VH/2;
 
   if (bannerT > 0){
     bannerT -= dt;
@@ -1153,6 +1620,7 @@ function eatFood(e, dt, isPlayer){
   // fun, and the food field has to be dense enough that a grazer keeps both
   // evolving and topping up its boost meter
   const bite = e.r * (isPlayer ? 2.2 : 1.6);
+  let ate = 0;
   for (let i=0;i<foods.length;i++){
     const f = foods[i];
     if (f.dead) continue;
@@ -1161,12 +1629,16 @@ function eatFood(e, dt, isPlayer){
     f.respawn = rand(2, 7);
     addXP(e, FOOD_XP);
     refillBoost(e, FOOD_ENERGY);
+    if (f.id !== undefined) Net.foodGone.push(f.id);
+    ate++;
     if (isPlayer){
       e.foodEaten++;
       Sfx.eat();
       e.flash = 0.12;
     }
   }
+  // a client cannot award itself XP; the host reports what it ate
+  if (ate && e.isPlayer && e.isNet) Net.fed.push({ id: e.id, n: ate });
 }
 
 function resolveCombat(dt){
@@ -1193,12 +1665,38 @@ function resolveCombat(dt){
         }
       }
     }
-    // NPC vs NPC
+    // NPC vs NPC, and NPC vs remote player
     for (let j=i+1;j<critters.length;j++){
       const b = critters[j];
       if (b.dead) continue;
       const rr = a.r + b.r;
       if (dist2(a.x,a.y,b.x,b.y) < rr*rr){
+        if (a.rank > b.rank) kill(a, b);
+        else if (b.rank > a.rank) kill(b, a);
+      }
+    }
+  }
+  // remote players fight each other and the host under the same rank rules
+  const remote = Array.from(Net.peers.values());
+  for (let i = 0; i < remote.length; i++){
+    const a = remote[i];
+    if (a.dead) continue;
+    if (!player.dead){
+      const rr = a.r + player.r;
+      if (dist2(a.x, a.y, player.x, player.y) < rr*rr){
+        if (a.rank > player.rank){
+          if (player.invuln > 0) a.strikeT = 0;
+          else if (a.strikeT <= 0){ a.strikeT = STRIKE_TIME; Sfx.strike(); }
+          else { a.strikeT -= dt; if (a.strikeT <= 0) kill(a, player); }
+        } else if (a.rank < player.rank){
+          kill(player, a);
+        }
+      }
+    }
+    for (let j = i + 1; j < remote.length; j++){
+      const b = remote[j];
+      if (b.dead) continue;
+      if (dist2(a.x, a.y, b.x, b.y) < a.r + b.r){
         if (a.rank > b.rank) kill(a, b);
         else if (b.rank > a.rank) kill(b, a);
       }
@@ -1246,6 +1744,22 @@ function kill(pred, prey){
     el.veil.classList.add("on");
     showBanner("EATEN!", "&minus;" + lostTotal.toFixed(1) + " XP total &middot; respawning in " +
                RESPAWN_TIME.toFixed(1) + "s", RESPAWN_TIME);
+  }
+
+  /* Players that live on somebody else's machine need to be told. */
+  if (Net.mode === "host"){
+    const preyIsPlayer = prey.isPlayer;
+    const predIsPlayer = pred.isPlayer;
+    if (preyIsPlayer || predIsPlayer){
+      Net.broadcast({
+        t: "kill",
+        prey:   preyIsPlayer ? (prey.isNet ? prey.id : 0) : -1,
+        killer: predIsPlayer ? (pred.isNet ? pred.id : 0) : -1,
+        gain: gain,
+        by:     predIsPlayer ? pred.name : RANKS[pred.rank].name,
+        victim: preyIsPlayer ? prey.name : RANKS[prey.rank].name
+      });
+    }
   }
 }
 
@@ -1354,6 +1868,12 @@ function render(){
 
   // ---- critters ----
   for (let i=0;i<critters.length;i++) drawCritter(critters[i], view, false);
+
+  // ---- remote players (host sees them directly, clients get them in the
+  // snapshot and they already live in critters[], so only the host draws here) ----
+  if (Net.mode === "host"){
+    Net.peers.forEach(p => { if (!p.dead) drawCritter(p, view, false); });
+  }
 
   if (!player.dead || (player.dead && player.deadT > RESPAWN_TIME - 0.35)) drawCritter(player, view, true);
 
@@ -1503,8 +2023,10 @@ window.EvoQuest = {
   BOOST_MULT: BOOST_MULT, NPC_SPAWN_SAFE: NPC_SPAWN_SAFE,
   PLAYER_PICKUP: PLAYER_PICKUP, PLAYER_HUNT_GAP: PLAYER_HUNT_GAP,
   SPAWN_SAFE: SPAWN_SAFE, KILL_ENERGY: KILL_ENERGY, FOOD_ENERGY: FOOD_ENERGY,
-  STRIKE_TIME: STRIKE_TIME,
-  world: WORLD,
+  STRIKE_TIME: STRIKE_TIME, WORLD: WORLD, world: WORLD,
+  Net: Net, NetHooks: NetHooks, rebuildWorldFromSeed: rebuildWorldFromSeed,
+  applySnapshot: applySnapshot, cleanRoom: cleanRoom, ui: ui,
+  setLobbyState: setLobbyState,
   get player(){ return player; },
   get cam(){ return cam; },
   get critters(){ return critters; },
@@ -1516,7 +2038,7 @@ window.EvoQuest = {
   restart: restart,
   step: update,
   setPaused: function(v){ paused = !!v; },
-  spawnFoodAt: spawnFood,
+  spawnFoodAt: spawnFood, eatFood: eatFood,
   addXP: addXP,
   kill: kill
 };

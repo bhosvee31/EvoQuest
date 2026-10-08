@@ -330,10 +330,14 @@ export function boot(opts = {}) {
   const rafQueue = [];
   const listeners = { window: {}, document: {} };
 
+  // A real monotonic clock. The game rate-limits net sends on performance.now();
+  // stubbing it to a constant would stall every send permanently.
+  const clock = { t: 0, now: () => (clock.t += 16.7) };
+
   const sandbox = {
     console, Math, JSON, Date, Uint8ClampedArray, Object, Array, String, Number, Boolean,
     isNaN, parseInt, parseFloat, Int32Array, Uint8Array,
-    setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
+    setTimeout: (fn) => { fn(); return 0; }, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
     requestAnimationFrame: (fn) => { rafQueue.push(fn); return rafQueue.length; },
     devicePixelRatio: 1, innerWidth: width, innerHeight: height,
     AudioContext: undefined,
@@ -344,7 +348,7 @@ export function boot(opts = {}) {
       addEventListener(t, f) { (listeners.document[t] ||= []).push(f); },
       body: makeEl("body")
     },
-    performance: { now: () => 0 }
+    performance: clock
   };
   sandbox.window = sandbox;
   sandbox.window.addEventListener = (t, f) => { (listeners.window[t] ||= []).push(f); };
