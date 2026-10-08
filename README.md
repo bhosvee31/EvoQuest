@@ -82,12 +82,15 @@ into the new rank. Once you're a Vampire the bar keeps filling as a score.
 **higher** rank can eat you. Equal ranks are harmless to each other. Touching is
 instant death for the loser — there is no health bar.
 
-**Killing** a creature transfers **30% of its XP** to you, plus **60% of the
-boost meter** — hunting is by far the fastest route to a boost burst.
+**Killing** a creature transfers **30% of everything it has ever earned** — its
+lifetime XP, not just what is sitting in its bar for its current rank — plus
+**60% of your boost meter**. Hunting is by far the fastest route to both XP and
+a boost burst, and old creatures are worth a lot.
 
-**Dying** costs you nothing but XP: you respawn after ~2.4s keeping **50% of the
-XP you had**, at a spot far from anything bigger, with a **5s spawn shield** so
-you can't be insta-killed on arrival.
+**Dying** costs you half of your entire XP estate: your lifetime total *and* the
+progress banked toward your current rank are both cut in half. You respawn after
+~2.4s far from anything bigger, with a **5s spawn shield** so you can't be
+insta-killed on arrival. Your rank is never lost — only the XP behind it.
 
 **Boost.** The meter holds at most **5 seconds**. Holding the button spends it
 at 1x speed x2.5. It comes back only by eating: 7% per piece of forage, 60% per
@@ -174,11 +177,14 @@ Everything in `tools/` is a development aid and is **not** needed to play or
 deploy the game. None of it ships inside `index.html`.
 
 ```powershell
-# 76 assertions covering the rules, plus balance simulations
+# 87 assertions covering the rules, plus balance simulations
 node tools\headless-test.mjs
 
-# measure deaths-per-run and progression with and without reacting to warnings
+# measure deaths/progression with and without reacting to warnings
 node tools\death-diagnostic.mjs
+
+# check how large creature lifetime XP grows, and what a kill on it pays out
+node tools\kill-payout-probe.mjs
 
 # render real game frames to PNG (a small software canvas + PNG encoder)
 node tools\snapshot.mjs
@@ -214,6 +220,7 @@ tools/
   harness.mjs           DOM stub + software canvas + PNG encoder
   headless-test.mjs     rule, AI and balance tests
   death-diagnostic.mjs  deaths/progression measurement over many runs
+  kill-payout-probe.mjs creature lifetime XP growth and kill payout scaling
   snapshot.mjs          render game frames to PNG
   codex-shot.mjs        render the guide panel to PNG
 ```

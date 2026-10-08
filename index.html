@@ -196,8 +196,8 @@
       <li><b>Move</b> &mdash; your creature walks toward your cursor.</li>
       <li><b>Boost</b> &mdash; hold <b>left click</b> or <b>Spacebar</b> for a speed burst.</li>
       <li><b>Eat</b> &mdash; floor food is <b>0.2 XP</b> and nudges your boost. You may eat anything <b>below</b> your rank.</li>
-      <li><b>Hunt</b> &mdash; killing another creature gives you <b>30%</b> of their XP and most of your boost back.</li>
-      <li><b>Survive</b> &mdash; if you are eaten you return with <b>50%</b> of your XP.</li>
+      <li><b>Hunt</b> &mdash; killing another creature gives you <b>30%</b> of everything it ever earned, plus most of your boost.</li>
+      <li><b>Survive</b> &mdash; if you are eaten you keep <b>50%</b> of all your XP, lifetime total included.</li>
     </ol>
     <button id="go">ENTER THE FOOD CHAIN</button>
     <div class="tiny">Runs entirely offline &middot; single HTML file &middot; best with a mouse</div>
@@ -1208,10 +1208,12 @@ function resolveCombat(dt){
 
 function kill(pred, prey){
   if (prey.dead) return;
-  const gain = prey.xp * KILL_XP_SHARE;
+  // a kill takes a share of everything the victim has ever earned, not just
+  // what is sitting in the bar for their current rank
+  const gain = prey.totalXp * KILL_XP_SHARE;
   prey.dead = true;
   prey.deadT = pred.isPlayer ? 0.05 : rand(3, 9);
-  prey.vx = prey.vy = 0;
+  prey.vy = 0; prey.vx = 0;
   prey.flash = 0.2;
   pred.flash = 0.14;
   pred.burst = 1;
@@ -1222,21 +1224,28 @@ function kill(pred, prey){
     refillBoost(pred, KILL_ENERGY);
     Sfx.kill();
     pushFeed("Ate <b style='color:" + RANKS[prey.rank].color + "'>" + RANKS[prey.rank].name +
-             "</b> &nbsp;+" + gain.toFixed(1) + " XP (" + Math.round(KILL_XP_SHARE * 100) + "%)", "kill");
+             "</b> &nbsp;+" + gain.toFixed(1) + " XP (" + Math.round(KILL_XP_SHARE * 100) +
+             "% of their " + prey.totalXp.toFixed(1) + ")", "kill");
   } else if (prey.isPlayer){
-    const kept = player.xp * DEATH_XP_KEEP;
+    // Being eaten costs half of everything you have ever earned -- your whole
+    // lifetime total *and* the progress banked toward the current rank. Halving
+    // only the current rank left the bar untouched after a death.
+    const lostTotal = player.totalXp * (1 - DEATH_XP_KEEP);
     addXP(pred, gain);
     refillBoost(pred, KILL_ENERGY);
     Sfx.death();
     player.deaths++;
     pushFeed("Eaten by <b style='color:" + RANKS[pred.rank].color + "'>" + RANKS[pred.rank].name +
-             "</b> &nbsp;kept " + kept.toFixed(1) + " XP (50%)", "death");
+             "</b> &nbsp;&minus;" + lostTotal.toFixed(1) + " XP (50% of all " +
+             player.totalXp.toFixed(1) + ")", "death");
     player.dead = true;
     player.deadT = RESPAWN_TIME;
     player.vx = player.vy = 0;
-    player.xp = kept;
+    player.xp *= DEATH_XP_KEEP;
+    player.totalXp *= DEATH_XP_KEEP;
     el.veil.classList.add("on");
-    showBanner("EATEN!", "Respawning with " + kept.toFixed(1) + " XP in " + RESPAWN_TIME.toFixed(1) + "s", RESPAWN_TIME);
+    showBanner("EATEN!", "&minus;" + lostTotal.toFixed(1) + " XP total &middot; respawning in " +
+               RESPAWN_TIME.toFixed(1) + "s", RESPAWN_TIME);
   }
 }
 

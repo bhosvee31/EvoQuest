@@ -104,7 +104,7 @@ console.log("\na kill is a meaningful boost burst");
   G.player.rank = 1;
   G.player.boost = 0;
   const victim = spawnNpc(0, 1, 0);
-  victim.xp = 2.0;
+  victim.xp = 2.0; victim.totalXp = 2.0;
   step(2);
   const pct = G.player.boost / G.BOOST_MAX * 100;
   console.log(`        a kill restores ${pct.toFixed(0)}% of the meter`);
@@ -157,23 +157,36 @@ console.log("\nhunting lower ranks");
   clearField(); clearNPCs(); resetPlayer();
   G.player.rank = 2;                                   // Butterfly
   const victim = spawnNpc(0, 1, 0);                   // Plankton
-  victim.xp = 4.0;
+  victim.xp = 4.0; victim.totalXp = 4.0;
   step(2);
   ok("Butterfly eats Plankton", G.player.kills === 1, G.player.kills);
-  ok("kill grants 30% of victim XP (1.2)", near(G.player.xp, 1.2), G.player.xp);
+  ok("kill grants 30% of the victim's XP (1.2)", near(G.player.xp, 1.2), G.player.xp);
   ok("victim is marked dead", victim.dead === true);
+}
+{
+  // the share must come from the victim's LIFETIME total, not their current
+  // rank progress -- an old creature with a nearly empty bar is still worth a lot
+  clearField(); clearNPCs(); resetPlayer();
+  G.player.rank = 2;
+  const veteran = spawnNpc(0, 1, 0);
+  veteran.xp = 0.4; veteran.totalXp = 60.0;
+  step(2);
+  // 30% of 60 == 18. Assert on the lifetime total: the bar may have already
+  // spent part of it on a promotion.
+  ok("kill pays out on lifetime XP, not the current-rank bar",
+     near(G.player.totalXp, 18.0), `${G.player.totalXp} (bar now ${G.player.xp}, rank ${G.player.rank})`);
 }
 {
   clearField(); clearNPCs(); resetPlayer();
   G.player.rank = 9;                                   // Vampire
   const victim = spawnNpc(4, 1, 0);
-  victim.xp = 2.0;
+  victim.xp = 2.0; victim.totalXp = 2.0;
   step(2);
   ok("Vampire eats Crab", G.player.kills === 1, G.player.kills);
   ok("kill grants 30% (0.6)", near(G.player.xp, 0.6), G.player.xp);
 }
 {
-  clearField(); resetPlayer();
+  clearField(); clearNPCs(); resetPlayer();
   G.player.rank = 2;
   const rival = spawnNpc(2, 1, 0);                    // same rank
   step(4);
@@ -184,7 +197,7 @@ console.log("\nbeing eaten");
 {
   clearField(); clearNPCs(); resetPlayer();
   G.player.rank = 1;                                   // Fish
-  G.player.xp = 6.0;
+  G.player.xp = 6.0; G.player.totalXp = 40.0;          // 40 earned overall, 6 in the bar
   const killer = spawnNpc(5, 1, 0);                   // Sparrow
   step(2);
   ok("a predator on top of you winds up first, it does not instantly kill",
@@ -192,8 +205,9 @@ console.log("\nbeing eaten");
   step(45);                                            // let the telegraph elapse
   ok("higher rank eats the player", G.player.deaths === 1, G.player.deaths);
   ok("player is dead", G.player.dead === true);
-  ok("player keeps 50% of XP (3.0)", near(G.player.xp, 3.0), G.player.xp);
-  ok("killer gains 30% of the player's XP", near(killer.xp, 1.8), killer.xp);
+  ok("death halves the LIFETIME total (40 -> 20)", near(G.player.totalXp, 20.0), G.player.totalXp);
+  ok("death also halves the current-rank bar (6 -> 3)", near(G.player.xp, 3.0), G.player.xp);
+  ok("killer gains 30% of the player's lifetime XP (12)", near(killer.xp, 12.0), killer.xp);
 }
 {
   // escaping during the windup must actually work
