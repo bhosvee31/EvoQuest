@@ -110,6 +110,31 @@ project. Five-minute setup:
 
 6. Reload. **Account: …** appears and sign-in works.
 
+### Checking your setup
+
+```powershell
+node tools\check-firebase.mjs    # is FB_CONFIG filled in and does the game still boot?
+node tools\rules-lint.mjs        # are the Firestore rules valid Rules-language?
+```
+
+Both run offline. `check-firebase` boots the game and reads the real evaluated
+config rather than regex-parsing the source, so a syntax error in `FB_CONFIG` is
+reported instead of silently killing the whole game script. It expects 2 failures
+while the config is still empty — that is the correct "not set up yet" result.
+
+Testing: **do not double-click `index.html`.** A popup sign-in from a `file://`
+page fails because the origin is `null`. Serve it instead:
+
+```powershell
+python -m http.server 8000     # then open http://localhost:8000
+```
+
+`localhost` is already an authorized domain, so Google sign-in works there.
+Push to GitHub Pages when you are happy.
+
+Once signed in, verify by looking at **Firestore → Data**: a `profiles`
+collection should appear with one document whose ID is your user UID.
+
 While `FB_CONFIG` is empty the sign-in buttons are disabled and the game behaves
 exactly as before. The Firebase SDK is only fetched from a CDN when you actually
 click sign-in.
@@ -286,6 +311,12 @@ node tools\multiplayer-test.mjs
 # 41 assertions: local profile, tampered-storage sanitising, merge policy
 node tools\account-test.mjs
 
+# is the Firebase config filled in and does the game still boot?
+node tools\check-firebase.mjs
+
+# are the Firestore rules valid Rules-language and do their fields match the game?
+node tools\rules-lint.mjs
+
 # measure deaths/progression with and without reacting to warnings
 node tools\death-diagnostic.mjs
 
@@ -328,6 +359,8 @@ tools/
   headless-test.mjs     rule, AI and balance tests
   multiplayer-test.mjs  two peers, join/snapshot/PvP/food-credit/leaving
   account-test.mjs      profile save/load, sanitising, merge policy
+  check-firebase.mjs    is FB_CONFIG filled in and does the game still boot?
+  rules-lint.mjs        Firestore rules: Rules-language syntax + field-list match
   death-diagnostic.mjs  deaths/progression measurement over many runs
   kill-payout-probe.mjs creature lifetime XP growth and kill payout scaling
   hunt-payout-probe.mjs what an actual hunt pays out
