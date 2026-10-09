@@ -220,6 +220,17 @@ that rank. Otherwise a Crab would carry less XP than a Fish and every kill would
 be worth roughly the same. `xpFloor(rank)` in `index.html` is the single place
 that arithmetic lives.
 
+That floor is only a *starting* figure. Being eaten costs an NPC half of its
+lifetime XP, exactly as it costs you, so a revived Crab is worth less than a
+fresh one and repeated kills decay towards worthless (5.6, 2.8, 1.4, 0.7, 0.4,
+0.2 XP for six kills in a row) instead of parking one creature as an infinite
+source. The floor is deliberately **not** restored on revival: the total is a
+real quantity that death destroys, so a creature that has been eaten three times
+is legitimately worth less than its rank implies. It recovers the ordinary way,
+by eating. This applies at every rank - `reviveCritter` is rank-agnostic - with
+the exception of Vampire at rank 9, which has no predator at all, since nothing
+eats an equal rank.
+
 **Dying** costs you half of your entire XP estate: your lifetime total *and* the
 progress banked toward your current rank are both cut in half. You respawn after
 ~2.4s far from anything bigger, with a **5s spawn shield** so you can't be

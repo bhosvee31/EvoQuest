@@ -2314,6 +2314,17 @@ function reviveCritter(c){
   c.x = s.x; c.y = s.y;
   c.vx = c.vy = 0;
   c.xp = 0;
+  /* Being eaten costs an NPC half its lifetime XP, the same rule the player
+     lives under. A kill pays a quarter of this figure out to the predator, so
+     without it a revived creature keeps the full total and one NPC becomes an
+     infinite XP source -- park next to a Crab and kill it forever. Halving it
+     here makes the farm decay, and it recovers the ordinary way, by eating.
+
+     This is deliberately not clamped back up to xpFloor(rank). The floor is what
+     a creature is *seeded* with on spawn; the total is a real quantity that
+     death destroys, exactly as it does for the player. So a Crab that has been
+     eaten three times is legitimately worth less than a fresh one. */
+  c.totalXp *= DEATH_XP_KEEP;
   c.boost = BOOST_MAX;
   c.flash = 0; c.burst = 0; c.boosting = false;
   c.state = "wander"; c.target = null;

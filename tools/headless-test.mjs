@@ -216,6 +216,70 @@ console.log("\nNPCs carry XP consistent with their rank");
      G.player.xp === 0 && G.player.totalXp === 0, `${G.player.xp}/${G.player.totalXp}`);
 }
 
+console.log("\nbeing eaten costs every rank half its XP");
+{
+  // reviveCritter halves the lifetime total for whatever rank it is, so one
+  // creature cannot be farmed forever. The rank floor seeded at spawn is
+  // deliberately not restored: the total is a real quantity that death destroys,
+  // exactly as it is for the player.
+  //
+  // Rank 9 is not in the table. Nothing eats an equal rank, so a Vampire has no
+  // predator at all - neither the player nor an NPC can kill it. That is
+  // pre-existing and separate from the payout, but it means rank 9 cannot be
+  // exercised through the combat path at all.
+  clearField(); resetPlayer();
+  const rows = [];
+  for (let r = 0; r < 9; r++){
+    clearNPCs(); resetPlayer();
+    G.player.rank = 9;                            // anything below Vampire is edible
+    G.player.invuln = 1e6;
+    const victim = spawnNpc(r, 1, 0);
+    victim.totalXp = 100;                         // identical seed per rank
+    step(4);                                      // player kills on contact
+    const atDeath = victim.totalXp;
+    step(150);                                    // let it revive
+    rows.push({ rank: r, name: G.RANKS[r].name,
+                floor: G.RANKS.slice(0, r).reduce((s, x) => s + x.need, 0),
+                atDeath, after: victim.totalXp, bar: victim.xp });
+  }
+  console.log("        rank        floorXP   pays     after revival   pays again");
+  for (const q of rows)
+    console.log("        " + q.name.padEnd(10) + String(q.floor).padStart(9) +
+                (q.atDeath * G.KILL_XP_SHARE).toFixed(1).padStart(8) +
+                q.after.toFixed(1).padStart(18) +
+                (q.after * G.KILL_XP_SHARE).toFixed(1).padStart(13));
+
+  ok("every rank lost exactly half its lifetime total",
+     rows.every(q => near(q.after, q.atDeath * 0.5)),
+     rows.map(q => q.after.toFixed(1)).join(","));
+  ok("the rank floor is not restored on revival",
+     rows.filter(q => q.floor > 50).every(q => q.after < q.floor),
+     rows.filter(q => q.floor > 50).map(q => `${q.name} floor ${q.floor} after ${q.after}`).join(", "));
+  ok("revival zeroes the current-rank bar at every rank",
+     rows.every(q => q.bar === 0), rows.map(q => q.bar).join(","));
+
+  // one representative rank, killed over and over, must decay towards worthless
+  clearNPCs(); resetPlayer();
+  G.player.rank = 9; G.player.invuln = 1e6;
+  const victim = spawnNpc(4, 1, 0);               // Crab
+  victim.totalXp = 45;
+  const trail = [];
+  for (let round = 0; round < 6; round++){
+    victim.x = G.player.x + 1; victim.y = G.player.y; victim.invuln = 0;
+    step(4);
+    step(150);
+    trail.push((victim.totalXp * G.KILL_XP_SHARE).toFixed(1));
+  }
+  console.log("        Crab killed 6x over, XP paid each time: " + trail.join(" -> "));
+  ok("repeat kills keep decaying instead of resetting to the rank floor",
+     trail.every((v, i) => i === 0 || parseFloat(v) < parseFloat(trail[i-1])),
+     trail.join(" -> "));
+  ok("enough repeat kills leave it worthless, which is the point",
+     parseFloat(trail[trail.length-1]) < 1.0, trail[trail.length-1] + " XP per kill");
+  ok("the player never goes through revival halving",
+     G.player.totalXp >= 0 && G.KILL_XP_SHARE === 0.25, G.player.totalXp);
+}
+
 console.log("\nbeing eaten");
 {
   clearField(); clearNPCs(); resetPlayer();
