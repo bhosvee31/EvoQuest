@@ -79,6 +79,36 @@ for (const [re, msg] of required) {
   if (!re.test(src)) problems.push(`structure: ${msg}`);
 }
 
+/* ---- helper functions must be a single return expression ----
+   This rules file got rejected twice by the real compiler with unhelpful
+   "Unexpected 'if'" errors, both from function bodies that did more than one
+   thing. The shape the Firebase docs use is always: one `return`, one
+   expression. Enforce that here so the compiler never sees anything else. */
+{
+  const fnRe = /function\s+(\w+)\s*\([^)]*\)\s*\{([\s\S]*?)\n\s{4}\}/g;
+  let m;
+  while ((m = fnRe.exec(src))) {
+    const name = m[1], body = m[2];
+    const returns = (body.match(/\breturn\b/g) || []).length;
+    const ifs     = (body.match(/\bif\s*\(/g) || []).length;
+    const lets    = (body.match(/\blet\b/g) || []).length;
+    if (ifs)    problems.push(`function ${name}: contains if() - helpers must be a single return expression`);
+    if (lets)   problems.push(`function ${name}: contains let() - helpers must be a single return expression`);
+    if (returns > 1) problems.push(`function ${name}: has ${returns} returns - helpers must be a single return expression`);
+    if (returns === 0) problems.push(`function ${name}: has no return`);
+  }
+}
+
+/* ---- banned type-operator patterns seen to be rejected ----
+   `!(x is int)` in particular is what broke the first published version. */
+{
+  code.forEach((line, i) => {
+    if (/!\s*\([^)]*\bis\b[^)]*\)/.test(line)) {
+      add(i + 1, "negation of a parenthesised 'is' type check is rejected - drop it or restructure");
+    }
+  });
+}
+
 /* ---- the document id must be the caller's uid ---- */
 if (/match\s+\/profiles\/\{uid\}/.test(src) && !/request\.auth\.uid\s*==\s*uid/.test(src)) {
   problems.push("structure: /profiles/{uid} must be guarded by request.auth.uid == uid");
@@ -88,7 +118,7 @@ if (/match\s+\/profiles\/\{uid\}/.test(src) && !/request\.auth\.uid\s*==\s*uid/.
    If these drift apart every cloud save is rejected with PERMISSION_DENIED and
    the account silently stops saving, which is painful to debug later. */
 {
-  const listMatch = src.match(/hasOnlyKnownFields\(\)\s*\{[\s\S]*?hasOnly\(\[([\s\S]*?)\]\)/);
+  const listMatch = src.match(/hasOnly\(\s*\[([\s\S]*?)\]/);
   if (!listMatch) {
     problems.push("structure: could not find the hasOnly([...]) field list to cross-check");
   } else {

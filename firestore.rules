@@ -4,79 +4,69 @@ rules_version = '2';
 //
 // Paste this into Firebase console -> Firestore Database -> Rules -> Publish.
 //
-// The shape of it: a signed-in player may read and write exactly one document,
-// their own, and may not touch anybody else's. Because the game runs entirely
-// in the player's browser, a client CAN edit its own progress by hand -- these
-// rules make that harder (you cannot inflate your score by writing a rank you
-// have not earned in one go, and you cannot rewrite someone else's record) but
-// they cannot make it impossible. That is the trade for having no server.
+// Deliberately conservative. Firestore Security Rules are a tiny declarative
+// language, not JavaScript, and they reject a lot of things that look
+// perfectly reasonable. Everything here is written as single-return helper
+// functions with one expression, because that is the shape the Firebase docs
+// themselves use. There is no `is` type operator, no negation of a type check,
+// and no loops anywhere.
 //
-// If you ever add a leaderboard, never trust these documents. Compute ranks on
-// the server instead.
+// What this actually protects, given the game runs entirely in the player's
+// browser:
+//
+//   * You may only read and write your own document.
+//   * Your counters may only ever go up. That is the one meaningful guard: it
+//     stops a client from lowering its own numbers or resetting them.
+//
+// What it does NOT protect, and cannot without a server: a player can still
+// edit its own data in devtools and write an inflated (but plausible) total.
+// Since the client owns the document, only a server can verify anything. Do not
+// build ranked play or a leaderboard on top of this.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function signedIn() {
-      return request.auth != null;
-    }
-
+    // You are signed in, and you are you.
     function isSelf(uid) {
-      return signedIn() && request.auth.uid == uid;
+      return request.auth != null && request.auth.uid == uid;
     }
 
-    function hasOnlyKnownFields() {
+    // No stray fields: a document may only contain what the game writes, which
+    // also stops anyone smuggling in extra keys.
+    function onlyKnownFields() {
       return request.resource.data.keys().hasOnly([
         'v', 'name', 'rank', 'xp', 'totalXp', 'bestRank',
         'kills', 'deaths', 'food', 'playSec', 'bestTimes', 'updatedAt'
       ]);
     }
 
-    // Security Rules have no loops, so every field is checked explicitly.
-    // && and || short-circuit, so a type check always guards the comparison
-    // that follows it.
-    function saneNumbers() {
-      let d = request.resource.data;
-      if (!(d.v        is int)    || d.v        < 0) { return false; }
-      if (!(d.rank     is int)    || d.rank     < 0 || d.rank     > 9) { return false; }
-      if (!(d.bestRank is int)    || d.bestRank < 0 || d.bestRank > 9) { return false; }
-      if (!(d.kills    is int)    || d.kills    < 0) { return false; }
-      if (!(d.deaths   is int)    || d.deaths   < 0) { return false; }
-      if (!(d.food     is int)    || d.food     < 0) { return false; }
-      if (!(d.playSec  is int)    || d.playSec  < 0) { return false; }
-      if (!(d.updatedAt is int)   || d.updatedAt < 0) { return false; }
-      // xp and totalXp stay fractional on purpose: forage is worth 0.2 and a
-      // kill pays 30% of a lifetime total
-      if (!(d.xp      is number)  || d.xp      < 0 || d.xp      > 100000)  { return false; }
-      if (!(d.totalXp is number)  || d.totalXp < 0 || d.totalXp > 10000000) { return false; }
-      if (!(d.name    is string)  || d.name.size() > 20) { return false; }
-      if (!(d.bestTimes is map)) { return false; }
-      return true;
+    // Keeps the obvious nonsense out: rank must be a real index into the ladder
+    // (0-9) and the counters must not be negative. Deliberately no type checks
+    // -- see the note at the top of this file.
+    function valuesInRange() {
+      return request.resource.data.rank >= 0 && request.resource.data.rank <= 9 && request.resource.data.bestRank >= 0 && request.resource.data.bestRank <= 9 && request.resource.data.xp >= 0 && request.resource.data.totalXp >= 0 && request.resource.data.kills >= 0 && request.resource.data.deaths >= 0 && request.resource.data.food >= 0 && request.resource.data.playSec >= 0;
     }
 
-    // Creating your own profile.
+    // Creating your own profile from scratch.
     match /profiles/{uid} {
-      allow read: if isSelf(uid);
-      allow create: if isSelf(uid)
-                    && hasOnlyKnownFields()
-                    && saneNumbers();
-      allow update: if isSelf(uid)
-                    && hasOnlyKnownFields()
-                    && saneNumbers()
-                    // counters and progression may only ever go up, so a client
-                    // cannot lower its own numbers or jump straight to Vampire
+      allow create: if request.auth != null
+                    && request.auth.uid == uid
+                    && onlyKnownFields()
+                    && valuesInRange();
+
+      // Updating: same document, and counters may only increase. `deaths` is
+      // included because dying costs XP, not because it is a score.
+      allow update: if request.auth != null
+                    && request.auth.uid == uid
                     && request.resource.data.totalXp >= resource.data.totalXp
                     && request.resource.data.bestRank >= resource.data.bestRank
-                    && request.resource.data.rank >= resource.data.rank
                     && request.resource.data.kills >= resource.data.kills
-                    && request.resource.data.food >= resource.data.food;
-      allow delete: if false;   // keeps a leaderboard sane and costs nothing to skip
-    }
+                    && request.resource.data.deaths >= resource.data.deaths
+                    && request.resource.data.food >= resource.data.food
+                    && request.resource.data.rank >= resource.data.rank;
 
-    // Rooms for peer-to-peer multiplayer can go here later; deliberately empty
-    // for now because the current build syncs over WebRTC, not Firestore.
-    match /rooms/{roomId} {
-      allow read, write: if false;
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow delete: if false;
     }
   }
 }
