@@ -286,7 +286,7 @@
       <li><b>Eat</b> &mdash; floor food is <b>0.2 XP</b> and nudges your boost. You may eat anything <b>below</b> your rank.</li>
       <li><b>Hunt</b> &mdash; killing another creature gives you <b>25%</b> of everything it ever earned, plus most of your boost.</li>
       <li><b>Survive</b> &mdash; if you are eaten you keep <b>50%</b> of all your XP, lifetime total included.</li>
-      <li><b>Account levels</b> &mdash; in-game XP also fills a separate account total that <b>never</b> goes down, even if you are eaten. Leaving level 0 costs 10, and each level after costs <b>1.2x</b> the one before. Every level adds <b>+0.05%</b> food XP, permanently.</li>
+      <li><b>Account levels</b> &mdash; in-game XP also fills a separate account total that <b>never</b> goes down, even if you are eaten. Leaving level 0 costs 10, and each level after costs <b>1.1x</b> the one before. Every level adds <b>+0.05%</b> food XP, permanently.</li>
     </ol>
     <button id="go">ENTER THE FOOD CHAIN</button>
     <div class="tiny">Runs entirely offline &middot; single HTML file &middot; best with a mouse</div>
@@ -641,40 +641,61 @@ const STRIKE_TIME   = 0.6;  // telegraph before a creature that is touching you
    and cannot touch this, and this never feeds into the rank ladder. You earn it
    by earning in-game XP.
 
-   Level 0 costs 10 account XP. Each level costs 1.2x the level before it, rounded
+   Level 0 costs 10 account XP. Each level costs 1.1x the level before it, rounded
    to a whole number at every step -- so it chains through the *rounded* figure,
-   level 2 being round(12 * 1.2) = 14 rather than round(10 * 1.2 * 1.2) = 14.
-   The two agree here and drift apart further up.
+   level 2 being round(11 * 1.1) = 12 rather than round(10 * 1.1 * 1.1) = 12. The
+   two agree here and drift apart further up.
 
-   Because of that rounding the chain cannot be closed-form'd with logs, so the
-   low levels are built exactly, one rounding step at a time.
+   Because of that rounding the chain cannot be closed-form'd with logs, so the low
+   levels are built exactly, one rounding step at a time.
 
    Above that the stored thresholds are log10 of the cumulative total rather than
-   the total itself. Level 99999 needs about 1e7917, which is far past the largest
-   representable double (~1.8e308), so a table of raw totals cannot span the whole
-   range -- an earlier version clamped at MAX_SAFE_INTEGER, which silently froze
-   every level from 181 onwards at the same cost and turned the top of the ladder
-   into a cliff: 9.00e15 XP gave level 180 and 9.01e15 gave level 99999. In log
-   space the chain keeps following 1.2x to the real cap, nothing overflows, and
-   the per-level gap is about 0.07 in log10, which is ten orders of magnitude
-   more precision than a double needs to tell levels apart. */
-const LEVEL_CAP        = 99999;
+   the total itself, because the ladder does not fit in a double: the last level a
+   double can represent costs around 1e308, and everything past it is Infinity. In
+   log space consecutive levels sit about 0.04 apart, which is far finer than a
+   double needs to tell them apart.
+
+   An earlier version hardcoded a cap of 99999 and clamped the thresholds at
+   MAX_SAFE_INTEGER to stop them overflowing. The clamp did exactly what it said
+   and quietly destroyed the feature: every level from 181 up reported a
+   requirement of 0, and 9.00e15 XP gave level 180 while 9.01e15 gave level 99999.
+   So the cap is now *derived* -- it is the last level whose threshold a double can
+   still hold, and the level after it is genuinely Infinity. */
 const LEVEL_REQ_0      = 10;
-const LEVEL_GROWTH     = 1.2;
+const LEVEL_GROWTH     = 1.1;
 const LEVEL_FOOD_BONUS = 0.0005;   // +0.05% food XP per level, none at level 0
 const ACCT_XP_PER_XP   = 1;        // account XP earned per in-game XP earned
 
 /* Below this level the chain is built with exact integer arithmetic, so the
    "round to a whole number" rule is honoured literally. Above it the rounding is
-   meaningless against numbers near 1e7917 anyway, and the closed form takes over. */
+   meaningless against numbers near 1e308 anyway, and the closed form takes over. */
 const LEVEL_EXACT_UNTIL = 200;
+
+/* Run the exact chain once up front. It yields both the seed the closed form needs
+   and the numbers used to derive the cap. */
+const levelSeed = (function(){
+  let req = LEVEL_REQ_0, cum = 0;
+  for (let L = 0; L < LEVEL_EXACT_UNTIL; L++){
+    cum += req;
+    req = Math.round(req * LEVEL_GROWTH);
+  }
+  return { logA: Math.log10(req / (LEVEL_GROWTH - 1)), cum: cum, req: req };
+})();
+
+/* The highest level whose threshold is still a finite double. Threshold(L) is
+   logA + (L - 200) * log10(1.1) in log space, so this is just the point where that
+   runs past log10(Number.MAX_VALUE). One level further costs more XP than can
+   exist, so its threshold is Infinity and no amount of progress reaches it. */
+const LEVEL_CAP = Math.floor(
+  (Math.log10(Number.MAX_VALUE) - levelSeed.logA) / Math.log10(LEVEL_GROWTH)
+) + LEVEL_EXACT_UNTIL;
 
 let _levelLog = null;
 function levelThresholds(){
   if (_levelLog) return _levelLog;
-  const t = new Float64Array(LEVEL_CAP + 1);
+  const t = new Float64Array(LEVEL_CAP + 2);
   const K = Math.min(LEVEL_EXACT_UNTIL, LEVEL_CAP);
-  const k = Math.log10(LEVEL_GROWTH);          // ~0.07918 per level
+  const k = Math.log10(LEVEL_GROWTH);          // ~0.04139 per level
   let req = LEVEL_REQ_0, cum = 0;
   t[0] = -Infinity;                            // log10(0)
   for (let L = 0; L < K; L++){
@@ -682,32 +703,34 @@ function levelThresholds(){
     t[L + 1] = Math.log10(cum);
     req = Math.round(req * LEVEL_GROWTH);
   }
-  // Above that the chain keeps growing by exactly 1.2 a level, so the cumulative
+  // Above that the chain keeps growing by exactly 1.1 a level, so the cumulative
   // total is a geometric series and can be extended in log space for every level
   // up to the cap without ever overflowing. It has to be *seeded from the exact
-  // chain*, not written as a bare 10 * 1.2^L: because the rounding is chained, the
-  // early round-downs compound into a permanent 3.24% deficit (level 746 is
-  // 1.136e60 exactly, not the 1.173e60 the unrounded form gives). Seeding from
-  // cum/req at the handover reproduces the exact chain to float precision.
-  const logA = Math.log10(req / (LEVEL_GROWTH - 1));
+  // chain*, not written as a bare 10 * 1.1^L: because the rounding is chained, the
+  // early round-downs compound into a permanent deficit, so the naive exponential
+  // is wrong by a constant percentage at every level above ~100. Seeding from
+  // req at the handover reproduces the exact chain to float precision.
+  const logA = levelSeed.logA;
   for (let L = K + 1; L <= LEVEL_CAP; L++)
     t[L] = logA + (L - K) * k;
+  t[LEVEL_CAP + 1] = Infinity;   // one past the cap: unreachable by definition
   _levelLog = t;
   return t;
 }
 
 /* Cumulative account XP needed to reach a level, and what leaving it costs. Both
    go through log space, so the round-trip loses a few ULP -- irrelevant at 10 XP,
-   and unavoidable at 1e7917. */
+   and unavoidable at 1e308. Level LEVEL_CAP+1 is genuinely Infinity. */
 function levelThreshold(level){
-  return Math.pow(10, levelThresholds()[clamp(level | 0, 0, LEVEL_CAP)]);
+  const L = clamp(level | 0, 0, LEVEL_CAP + 1);
+  return Math.pow(10, levelThresholds()[L]);
 }
 function levelRequirement(level){
   const t = levelThresholds();
   const L = clamp(level | 0, 0, LEVEL_CAP);
-  if (L >= LEVEL_CAP) return Infinity;
+  if (L >= LEVEL_CAP) return Infinity;           // the level after the cap costs all
   const next = Math.pow(10, t[L + 1]);
-  if (!isFinite(next)) return Infinity;         // beyond what a double can hold
+  if (!isFinite(next)) return Infinity;          // beyond what a double can hold
   return next - Math.pow(10, t[L]);
 }
 

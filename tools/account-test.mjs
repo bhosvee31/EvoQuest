@@ -164,13 +164,14 @@ console.log("\naccount level requirements");
   ok("level 0 is free", G.levelThreshold(0) === 0, G.levelThreshold(0));
   ok("leaving level 0 costs exactly 10", G.levelRequirement(0) === 10, G.levelRequirement(0));
   ok("level 0 requirement is 10", G.LEVEL_REQ_0 === 10, G.LEVEL_REQ_0);
-  ok("growth is 1.2x", G.LEVEL_GROWTH === 1.2, G.LEVEL_GROWTH);
+  ok("growth is 1.1x", G.LEVEL_GROWTH === 1.1, G.LEVEL_GROWTH);
 
-  // the spec: each level costs 1.2x the one before, rounded to a whole number,
-  // chained through the rounded figure. 10, 12, 14 (12*1.2=14.4), 17 (14*1.2=16.8)
-  const want = [10, 12, 14, 17, 20, 24, 29, 35, 42, 50, 60, 72, 86, 103, 124, 149];
+  // the spec: each level costs 1.1x the one before, rounded to a whole number,
+  // chained through the rounded figure. 10, 11, 12, 13, 14, 15, then
+  // round(16.5) = 17, round(18.7) = 19, round(20.9) = 21
+  const want = [10, 11, 12, 13, 14, 15, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41];
   const got = want.map((_, L) => G.levelRequirement(L));
-  ok("the requirement chain is 10, 12, 14, 17, 20, 24, ...",
+  ok("the requirement chain is 10, 11, 12, 13, 14, 15, 17, 19, ...",
      got.every((v, i) => near(v, want[i], 1e-6)), got.map(v => v.toFixed(3)).join(","));
   // the log round-trip costs a few ULP, so "whole number" means whole to 1e-6
   ok("every requirement is a whole number",
@@ -181,66 +182,85 @@ console.log("\naccount level requirements");
 
   ok("10 XP is level 1", G.levelForAcctXp(10) === 1, G.levelForAcctXp(10));
   ok("9.9 XP is still level 0", G.levelForAcctXp(9.9) === 0, G.levelForAcctXp(9.9));
-  ok("22 XP is level 2", G.levelForAcctXp(22) === 2, G.levelForAcctXp(22));
-  ok("36 XP is level 3", G.levelForAcctXp(36) === 3, G.levelForAcctXp(36));
+  ok("21 XP is level 2", G.levelForAcctXp(21) === 2, G.levelForAcctXp(21));
+  ok("33 XP is level 3", G.levelForAcctXp(33) === 3, G.levelForAcctXp(33));
+  ok("46 XP is level 4", G.levelForAcctXp(46) === 4, G.levelForAcctXp(46));
   const p = G.levelProgress(15);
   ok("progress reports what is banked toward the next level",
-     p.level === 1 && near(p.into, 5, 1e-6) && near(p.need, 12, 1e-6), `${p.level} ${p.into}/${p.need}`);
+     p.level === 1 && near(p.into, 5, 1e-6) && near(p.need, 11, 1e-6), `${p.level} ${p.into}/${p.need}`);
 }
 
-console.log("\nthe 1.2x chain holds across the whole cap, not just the low levels");
-// Thresholds are log10 because level 99999 needs ~1e7917, past the largest double.
-// The chain is built exactly up to LEVEL_EXACT_UNTIL and extended from there by a
-// geometric series seeded from the exact chain -- seeding matters, see below.
+console.log("\nthe 1.1x chain holds across the whole cap, not just the low levels");
+// Thresholds are log10 because the ladder does not fit in a double: the last
+// representable threshold is around 1e308. The chain is built exactly up to
+// LEVEL_EXACT_UNTIL and extended from there by a geometric series seeded from the
+// exact chain -- seeding matters, see below.
 {
   // the pure spec chain, computed the naive way, as the reference
   const chain = [10];
-  for (let L = 1; L <= 800; L++) chain.push(Math.round(chain[L-1] * 1.2));
+  for (let L = 1; L <= 2000; L++) chain.push(Math.round(chain[L-1] * 1.1));
   let worst = 0, worstAt = 0;
-  for (const L of [201, 250, 300, 500, 700, 746, 800]){
+  for (const L of [201, 250, 300, 700, 1426, 2000]){
     const rel = Math.abs(G.levelRequirement(L) - chain[L]) / chain[L];
     if (rel > worst){ worst = rel; worstAt = L; }
   }
   ok("the extended chain still matches the exact chain to float precision",
-     worst < 1e-12, `worst rel error ${worst.toExponential(2)} at level ${worstAt}`);
+     worst < 1e-8, `worst rel error ${worst.toExponential(2)} at level ${worstAt}`);
 
-  // the seeded closed form must NOT be the naive 10 * 1.2^L. Because the rounding
-  // is chained, the early round-downs compound into a permanent 3.24% deficit.
-  const naive = 10 * Math.pow(1.2, 746);
-  ok("level 746 is the first level costing at least a decillion",
-     G.levelRequirement(745) < 1e60 && G.levelRequirement(746) >= 1e60,
-     `745 = ${G.levelRequirement(745).toExponential(4)}, 746 = ${G.levelRequirement(746).toExponential(4)}`);
+  // the seeded closed form must NOT be the naive 10 * 1.1^L. Because the rounding
+  // is chained, the early round-downs compound into a permanent deficit.
+  const naive = 10 * Math.pow(1.1, 1426);
+  ok("level 1426 is the first level costing at least a decillion",
+     G.levelRequirement(1425) < 1e60 && G.levelRequirement(1426) >= 1e60,
+     `1425 = ${G.levelRequirement(1425).toExponential(4)}, 1426 = ${G.levelRequirement(1426).toExponential(4)}`);
   ok("and it is the chained figure, not the naive exponential",
-     Math.abs(G.levelRequirement(746) - chain[746]) / chain[746] < 1e-12 &&
-     Math.abs(naive - chain[746]) / chain[746] > 0.03,
-     `ours ${G.levelRequirement(746).toExponential(6)} vs naive ${naive.toExponential(6)}`);
+     Math.abs(G.levelRequirement(1426) - chain[1426]) / chain[1426] < 1e-8 &&
+     Math.abs(naive - chain[1426]) / chain[1426] > 0.002,
+     `ours ${G.levelRequirement(1426).toExponential(6)} vs naive ${naive.toExponential(6)}`);
 
   // the bug this replaced: the table used to be clamped at MAX_SAFE_INTEGER, so
-  // every level from 181 up reported need = 0 and 9.01e15 XP teleported to 99999
-  ok("no level above 180 reports a zero requirement",
-     [181, 182, 200, 745, 746].every(L => G.levelRequirement(L) > 0),
-     [181, 200, 746].map(L => G.levelRequirement(L)).join(", "));
-  const around = [8.9e15, 9e15, 9.0072e15, 9.1e15, 1e16].map(x => G.levelForAcctXp(x));
-  ok("levels climb smoothly across the old 9.007e15 cliff",
-     around.every((v, i) => i === 0 || v >= around[i-1]) &&
-     around[around.length-1] - around[0] <= 5,
-     around.join(" -> "));
-  ok("consecutive levels really do cost 1.2x",
-     near(G.levelRequirement(746) / G.levelRequirement(745), 1.2, 1e-9),
-     (G.levelRequirement(746) / G.levelRequirement(745)).toFixed(9));
+  // every level from 181 up reported need = 0 and a hair more XP jumped to the cap
+  ok("no level above 200 reports a zero requirement",
+     [201, 300, 1426, G.LEVEL_CAP - 1].every(L => G.levelRequirement(L) > 0),
+     [201, 300, 1426].map(L => G.levelRequirement(L)).join(", "));
+  let mono = true, maxJump = 0, prev = 0;
+  for (let i = 0; i <= 20000; i++){
+    const l = G.levelForAcctXp(Math.pow(10, i / 20000 * 18));   // 1 .. 1e18
+    if (l < prev) mono = false;
+    if (l - prev > maxJump) maxJump = l - prev;
+    prev = l;
+  }
+  ok("levels never go backwards anywhere from 1 to 1e18", mono, "went backwards");
+  ok("and never jump more than a few levels at a time",
+     maxJump <= 5, "largest jump was " + maxJump);
+  ok("consecutive levels really do cost 1.1x",
+     near(G.levelRequirement(1426) / G.levelRequirement(1425), 1.1, 1e-9),
+     (G.levelRequirement(1426) / G.levelRequirement(1425)).toFixed(9));
+  ok("still 1.1x at the very top of the ladder",
+     near(G.levelRequirement(G.LEVEL_CAP - 1) / G.levelRequirement(G.LEVEL_CAP - 2), 1.1, 1e-9),
+     (G.levelRequirement(G.LEVEL_CAP - 1) / G.levelRequirement(G.LEVEL_CAP - 2)).toFixed(9));
 }
 
 console.log("\naccount level cap and overflow");
 {
-  ok("the cap is level 99999", G.LEVEL_CAP === 99999, G.LEVEL_CAP);
+  ok("the cap is a real level, derived from the arithmetic",
+     Number.isInteger(G.LEVEL_CAP) && G.LEVEL_CAP > 1000, G.LEVEL_CAP);
   const t = G.levelThresholds();
-  ok("the table covers every level up to the cap", t.length === G.LEVEL_CAP + 1, t.length);
-  // t[0] is log10(0) = -Infinity on purpose; every other entry must be finite
-  ok("every threshold except level 0 is finite",
-     t.slice(1).every(Number.isFinite), "an entry overflowed");
+  ok("the table holds the cap and the unreachable level after it",
+     t.length === G.LEVEL_CAP + 2, t.length);
+  // t[0] is log10(0) = -Infinity on purpose and t[CAP+1] is the unreachable one
+  ok("every real threshold is finite",
+     t.slice(1, G.LEVEL_CAP + 1).every(Number.isFinite), "an entry overflowed");
   ok("no threshold is NaN", t.every(v => !Number.isNaN(v)), "an entry is NaN");
-  ok("the top of the ladder is still finite in log space",
-     Number.isFinite(t[G.LEVEL_CAP]), t[G.LEVEL_CAP]);
+  ok("the cap's own threshold is the largest a double can hold",
+     G.levelThreshold(G.LEVEL_CAP) <= Number.MAX_VALUE, G.levelThreshold(G.LEVEL_CAP));
+  ok("the level AFTER the cap has an infinite threshold",
+     G.levelThreshold(G.LEVEL_CAP + 1) === Infinity, G.levelThreshold(G.LEVEL_CAP + 1));
+  ok("so leaving the cap costs infinite XP and can never be done",
+     G.levelRequirement(G.LEVEL_CAP) === Infinity, G.levelRequirement(G.LEVEL_CAP));
+  ok("but leaving the level below it is an ordinary finite amount",
+     Number.isFinite(G.levelRequirement(G.LEVEL_CAP - 1)) &&
+     G.levelRequirement(G.LEVEL_CAP - 1) > 0, G.levelRequirement(G.LEVEL_CAP - 1));
   ok("a colossal total still resolves below the cap, not straight to it",
      G.levelForAcctXp(1e300) > 1000 && G.levelForAcctXp(1e300) < G.LEVEL_CAP,
      G.levelForAcctXp(1e300));
@@ -262,11 +282,17 @@ console.log("\naccount level cap and overflow");
   }
   ok("no input produces a broken level or a NaN readout",
      nan === 0 && badNeed === 0, `levels bad: ${nan}, readouts bad: ${badNeed}`);
-  ok("Infinity is the only thing that reads as maxed",
+  ok("Infinity reads as the cap, maxed",
+     G.levelForAcctXp(Infinity) === G.LEVEL_CAP &&
      G.levelProgress(Infinity).maxed === true && G.levelProgress(Infinity).need === 0,
      JSON.stringify(G.levelProgress(Infinity)));
-  ok("a merely colossal total is a real level, not a fake cap",
-     G.levelProgress(1e300).maxed === false && G.levelProgress(1e300).level > 1000,
+  ok("so does the largest double there is -- that IS the top of the ladder",
+     G.levelForAcctXp(Number.MAX_VALUE) === G.LEVEL_CAP &&
+     G.levelProgress(Number.MAX_VALUE).maxed === true,
+     `${G.levelForAcctXp(Number.MAX_VALUE)} vs cap ${G.LEVEL_CAP}`);
+  ok("a merely colossal total is a real level with room left, not a fake cap",
+     G.levelProgress(1e300).maxed === false && G.levelProgress(1e300).level > 1000 &&
+     G.levelForAcctXp(1e300) < G.LEVEL_CAP,
      JSON.stringify(G.levelProgress(1e300)).slice(0, 60));
 }
 

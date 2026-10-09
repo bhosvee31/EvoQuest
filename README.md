@@ -90,48 +90,57 @@ the rank ladder:
 - You earn it by earning in-game XP, at `ACCT_XP_PER_XP` (1:1 by default), so
   both food and kills count.
 
-Leaving level 0 costs **10** account XP. Each level after costs **1.2x** the level
+Leaving level 0 costs **10** account XP. Each level after costs **1.1x** the level
 before, **rounded to a whole number at every step**, chained through the rounded
 figure:
 
 ```
-level  0   1   2   3   4   5   6   7   8    9   10
-needs   10  12  14  17  20  24  29  35  42   50   60
-total   10  22  36  53  73  97 126 161 203  253  313
+level  0   1   2   3   4   5   6   7   8   9  10  11  12
+needs   10  11  12  13  14  15  17  19  21  23  25  28  31
+total   10  21  33  46  60  75  92 111 132 155 180 208 239
 ```
 
-Level 2 is `round(12 * 1.2) = 14`, not `round(10 * 1.2 * 1.2) = 14` — the same
+Level 2 is `round(11 * 1.1) = 12`, not `round(10 * 1.1 * 1.1) = 12` — the same
 number here, but they drift apart further up, and the rounded value is what the
-table chains.
+table chains. Note `round(16.5) = 17`: JS rounds halves toward `+Infinity`.
 
 Every level buys **+0.05% food XP**, permanently: level 0 has none, level 1 is
 `x1.0005`, level 10 is `x1.005`, level 100 is `x1.05`. The bonus applies to food
 only, not to kill payouts, and only to the player — NPCs have no account.
 
-The cap is **level 99999**. That is unreachable in practice, and reaching it is
-not a matter of patience: **level 746** costs `1.136e60` — one decillion — and the
-levels either side of it cost `9.466e59` and `1.363e60`. The cap itself would cost
-around `1e7920`. Since that is far past the largest representable double
-(`1.8e308`), thresholds are stored as `log10` of the cumulative total rather than
-the total itself, and compared in log space. Consecutive levels differ by about
-`0.079` in log10, ten orders of magnitude more than a double needs to tell them
-apart.
+### The cap is derived, not chosen
+
+The cap is **level 7398**, and it is not a round number because it is not a
+decision — it is wherever a `double` runs out. The ladder grows by 1.1 a level
+forever, so it does not fit: level 99999 would cost around `1e7920`, while the
+largest representable double is `1.8e308`.
+
+- **level 7398** costs `1.667e308` — a real, finite, purchasable threshold
+- **level 7399** costs `Infinity`, and is unreachable by definition
+
+`LEVEL_CAP` is computed as the largest level whose threshold still fits in a
+double, and the table holds one extra slot so the level past the cap genuinely
+reads as `Infinity` rather than being quietly clamped.
+
+Thresholds are stored as `log10` of the cumulative total and compared in log
+space. Consecutive levels differ by about `0.041` in log10, which is far finer
+than a double needs to tell them apart.
 
 Below **level 200** the chain is built exactly, one `Math.round` step at a time, so
 the "round to a whole number" rule is honoured literally. Above that the rounding
-is meaningless against numbers near `1e60`, and a geometric series seeded from the
+is meaningless against numbers near `1e308`, and a geometric series seeded from the
 exact chain takes over.
 
-The seed matters more than it looks. A naive closed form of `10 * 1.2^L` is wrong
-by a **constant 3.24%** at every level above ~100, because the rounding is
-*chained*: the early round-downs (14.4 → 14) compound, and every later step
-inherits the deficit. Level 746 is `1.136e60`, not the `1.173e60` the unrounded
-form gives. Seeding from the exact chain at the handover reproduces it to float
-precision (`~6e-15` relative).
+The seed matters more than it looks. A naive closed form of `10 * 1.1^L` is wrong
+by a **constant 0.27%** at every level above ~100, because the rounding is
+*chained*: the early round-downs compound, and every later step inherits the
+deficit. **Level 1426** is the first level costing at least a decillion —
+`1.059e60`, against `1.062e60` from the unrounded form. Seeding from the exact
+chain at the handover reproduces it to float precision (`~1e-10` relative).
 
-In practice account XP is a `double`, so the ceiling is whatever a double can hold:
-`1e308` XP works out to about **level 3868**. Levels beyond that exist in the table
-but cannot be bought, and are reported as maxed rather than as `NaN`.
+In practice account XP is a `double`, so the reachable ceiling lands where the
+numbers do: `1e300` XP is about **level 7392**, and the full `1.8e308` is exactly
+the cap.
 
 Because the chain rounds at every step it cannot be closed-form'd with
 logarithms, hence the 100,000-entry table — built lazily on first use (~1ms) and
@@ -394,7 +403,7 @@ node tools\headless-test.mjs
 # 49 assertions: full host/join flow against a stand-in PeerJS
 node tools\multiplayer-e2e-test.mjs
 
-# 96 assertions: local profile, tampered-storage sanitising, merge policy,
+# 103 assertions: local profile, tampered-storage sanitising, merge policy,
                         account level maths, cap and overflow safety, monotonicity
 node tools\account-test.mjs
 
