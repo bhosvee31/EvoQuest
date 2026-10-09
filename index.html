@@ -253,7 +253,8 @@
     <span>Eaten <b id="sFood">0</b></span><i>&middot;</i>
     <span>Kills <b id="sKills">0</b></span><i>&middot;</i>
     <span>Deaths <b id="sDeaths">0</b></span><i>&middot;</i>
-    <span>Total XP <b id="sXp">0.0</b></span>
+    <span>Total XP <b id="sXp">0.0</b></span><i>&middot;</i>
+    <span id="sLevel">Level <b>0</b></span>
   </div>
 
   <div id="help" class="panel">
@@ -285,6 +286,7 @@
       <li><b>Eat</b> &mdash; floor food is <b>0.2 XP</b> and nudges your boost. You may eat anything <b>below</b> your rank.</li>
       <li><b>Hunt</b> &mdash; killing another creature gives you <b>25%</b> of everything it ever earned, plus most of your boost.</li>
       <li><b>Survive</b> &mdash; if you are eaten you keep <b>50%</b> of all your XP, lifetime total included.</li>
+      <li><b>Account levels</b> &mdash; in-game XP also fills a separate account total that <b>never</b> goes down, even if you are eaten. Leaving level 0 costs 10, and each level after costs <b>1.2x</b> the one before. Every level adds <b>+0.05%</b> food XP, permanently.</li>
     </ol>
     <button id="go">ENTER THE FOOD CHAIN</button>
     <div class="tiny">Runs entirely offline &middot; single HTML file &middot; best with a mouse</div>
@@ -631,6 +633,102 @@ const NPC_SPAWN_SAFE = 900; // never reappear an NPC closer than this to the pla
 const STRIKE_TIME   = 0.6;  // telegraph before a creature that is touching you
                              // actually swallows you -- long enough to boost away
 
+/* ============================================================
+   ACCOUNT LEVELS
+   ============================================================
+   A second XP pool that belongs to the account, not to the run. It is
+   deliberately separate from the in-game XP above: dying halves your in-game XP
+   and cannot touch this, and this never feeds into the rank ladder. You earn it
+   by earning in-game XP.
+
+   Level 0 costs 10 account XP. Each level costs 1.2x the level before it, rounded
+   to a whole number at every step -- so it chains through the *rounded* figure,
+   level 2 being round(12 * 1.2) = 14 rather than round(10 * 1.2 * 1.2) = 14.
+   The two agree here and drift apart further up.
+
+   Because of that rounding the chain cannot be closed-form'd with logs, so it is
+   built once into a table of cumulative thresholds and cached. The cap is level
+   99999, where the exact requirement is around 1e7917 -- comfortably past the
+   largest representable double -- so the thresholds are clamped instead of being
+   allowed to overflow. The cap is unreachable in practice; the clamp is what
+   stops the arithmetic turning into Infinity if a profile ever claims one. */
+const LEVEL_CAP        = 99999;
+const LEVEL_REQ_0      = 10;
+const LEVEL_GROWTH     = 1.2;
+const LEVEL_FOOD_BONUS = 0.0005;   // +0.05% food XP per level, none at level 0
+const ACCT_XP_PER_XP   = 1;        // account XP earned per in-game XP earned
+
+let _levelCum = null;
+function levelThresholds(){
+  if (_levelCum) return _levelCum;
+  const t = new Float64Array(LEVEL_CAP + 1);
+  const CAP_XP = Number.MAX_SAFE_INTEGER;
+  let req = LEVEL_REQ_0, cum = 0;
+  t[0] = 0;
+  for (let L = 0; L < LEVEL_CAP; L++){
+    cum += req;                       // level L's own cost, before growing it
+    if (!isFinite(cum) || cum > CAP_XP) cum = CAP_XP;
+    t[L+1] = cum;
+    req = Math.round(req * LEVEL_GROWTH);
+    if (!isFinite(req) || req > CAP_XP) req = CAP_XP;
+  }
+  _levelCum = t;
+  return t;
+}
+
+/* The level a given account XP total has reached. Level L needs levelCum[L] XP
+   in total, so this is the largest L whose threshold is still <= xp. */
+function levelForAcctXp(xp){
+  const t = levelThresholds();
+  let lo = 0, hi = LEVEL_CAP;
+  while (lo < hi){
+    const mid = (lo + hi + 1) >> 1;
+    if (t[mid] <= xp) lo = mid; else hi = mid - 1;
+  }
+  return lo;
+}
+
+/* Where you sit inside the current level. `into` is XP banked toward the next
+   one, `need` is how much the next level costs. At the cap both go to 0. */
+function levelProgress(xp){
+  const t = levelThresholds();
+  const level = levelForAcctXp(xp);
+  if (level >= LEVEL_CAP) return { level: level, into: 0, need: 0, maxed: true };
+  return { level: level,
+           into: xp - t[level],
+           need: t[level + 1] - t[level],
+           maxed: false };
+}
+
+/* The bonus the level currently buys: 0.05% more food XP each level, so level 1
+   is x1.0005 and level 10 is x1.005. */
+function levelFoodBoost(level){
+  return 1 + Math.max(0, level || 0) * LEVEL_FOOD_BONUS;
+}
+
+/* The account's lifetime account-XP total. Monotonic by construction: nothing in
+   the game subtracts from it -- not death, not a merge, not loading an older
+   profile. awardAcctXp is the only writer in the file. */
+let acctXp = 0;
+
+function awardAcctXp(amount){
+  if (!(amount > 0)) return;
+  const before = levelForAcctXp(acctXp);
+  acctXp += amount * ACCT_XP_PER_XP;
+  const after = levelForAcctXp(acctXp);
+  if (after > before){
+    pushFeed("ACCOUNT LEVEL <b>" + after + "</b> &rarr; food XP <b>+" +
+             (after * LEVEL_FOOD_BONUS * 100).toFixed(2) + "%</b>", "evolve");
+    showBanner("LEVEL " + after, "+" + (after * LEVEL_FOOD_BONUS * 100).toFixed(2) + "% food XP", 2.4);
+  }
+}
+
+/* Food XP actually granted. Only the player earns the account level bonus; NPCs
+   have no account, so they stay on the flat FOOD_XP. */
+function foodXpFor(e){
+  return e.isPlayer ? FOOD_XP * levelFoodBoost(levelForAcctXp(acctXp)) : FOOD_XP;
+}
+
 /* Anti-frustration tuning. Without these, every creature above your rank
    swarms you and a low rank simply cannot get anywhere. */
 const PLAYER_PICKUP   = 300;  // how close a creature must be to notice the player
@@ -791,18 +889,19 @@ const Accounts = {
   KEY: "evoquest.profile.v1",
 
   /* ---------- local profile (always on) ---------- */
-  blank(){
+blank(){
     return {
       v: 1,
       name: "Player",
       rank: 0,
       xp: 0,
-totalXp: 0,
+      totalXp: 0,
       bestRank: 0,
       kills: 0,
       deaths: 0,
       food: 0,
       playSec: 0,
+      acctXp: 0,           // account level progress. Never decreases, unlike xp/totalXp.
       bestTimes: {},      // rank index -> seconds taken to first reach it
       updatedAt: 0
     };
@@ -829,6 +928,7 @@ totalXp: 0,
     b.deaths = int(o.deaths, 0, 1e9, 0);
     b.food   = int(o.food, 0, 1e9, 0);
     b.playSec= int(o.playSec, 0, 1e12, 0);
+    b.acctXp = num(o.acctXp, 0, 1e15, 0);          // fractional, monotonic
     b.updatedAt = int(o.updatedAt, 0, 1e15, 0);
     b.bestTimes = {};
     if (o.bestTimes && typeof o.bestTimes === "object"){
@@ -885,6 +985,7 @@ totalXp: 0,
       deaths: Math.max(a.deaths || 0, b.deaths || 0),
       food: Math.max(a.food || 0, b.food || 0),
       playSec: Math.max(a.playSec || 0, b.playSec || 0),
+      acctXp: Math.max(a.acctXp || 0, b.acctXp || 0),
       bestTimes,
       updatedAt: Date.now()
     };
@@ -1042,12 +1143,17 @@ function checkpoint(){
   p.deaths = player.deaths;
   p.food = player.foodEaten;
   p.playSec = (p.playSec || 0) + profileClock;
+  // max, never assignment: the account level total is monotonic, so a stale
+  // local profile must never walk it backwards
+  p.acctXp = Math.max(p.acctXp || 0, acctXp);
   profileClock = 0;
   Accounts.saveLocal(p);
   if (Accounts.user) Accounts.push(false);
 }
 function applyProfileToGame(p){
   if (!p || !player) return;
+  // monotonic, same rule: an older profile cannot pull the account level back
+  acctXp = Math.max(acctXp, p.acctXp || 0);
   player.rank = clamp(p.rank || 0, 0, RANKS.length - 1);
   player.xp = p.xp || 0;
   player.totalXp = p.totalXp || 0;
@@ -1337,7 +1443,7 @@ const NetHooks = {
     if (Net.mode !== "client") return;
     for (const f of msg.who || []){
       if (f.id !== Net.id) continue;
-      addXP(player, f.n * FOOD_XP);
+      addXP(player, f.n * foodXpFor(player));
       refillBoost(player, f.n * FOOD_ENERGY);
       player.foodEaten += f.n;
     }
@@ -1519,6 +1625,9 @@ function weightedRank(){
 
 function addXP(e, amount){
   e.xp += amount; e.totalXp += amount;
+  /* in-game XP is also what the account level is fed by. Kills count as well as
+     food -- the level tracks XP earned, not food eaten. */
+  if (e.isPlayer) awardAcctXp(amount);
   // at the top of the ladder there is nothing to evolve into, but keep taking
   // the XP so the bar still fills as a running score
   if (e.rank >= RANKS.length-1){
@@ -1687,6 +1796,9 @@ function renderAccountUI(){
       "Signed in as <b>" + esc(Accounts.user.email || (Accounts.user.isAnonymous ? "anonymous" : "Google")) + "</b><br>" +
       "<span class='muted'>" + esc(p.name) + " &middot; " + esc(rank) + " &middot; " +
       p.totalXp.toFixed(1) + " XP &middot; " + p.kills + " kills &middot; " + p.deaths + " deaths</span><br>" +
+  "<span class='muted'>Account level " + levelForAcctXp(acctXp) +
+  " &middot; " + acctXp.toFixed(1) + " account XP &middot; +" +
+  (levelForAcctXp(acctXp) * LEVEL_FOOD_BONUS * 100).toFixed(2) + "% food XP</span><br>" +
       "<span class='muted'>" + Accounts.status() + "</span>";
     au.note.textContent = Accounts.user.isAnonymous
       ? "This is a guest session on this device. Add an email to keep it permanently."
@@ -1784,6 +1896,7 @@ const el = {
   sKills:   document.getElementById("sKills"),
   sDeaths:  document.getElementById("sDeaths"),
   sXp:      document.getElementById("sXp"),
+  sLevel:   document.getElementById("sLevel"),
   feed:     document.getElementById("feed"),
   banner:   document.getElementById("banner"),
   bannerSub:document.getElementById("bannerSub"),
@@ -1856,6 +1969,14 @@ function updateHUD(){
   el.sKills.textContent  = player.kills;
   el.sDeaths.textContent = player.deaths;
   el.sXp.textContent     = player.totalXp.toFixed(1);
+
+  // account level: separate from in-game XP, never lost, buys a food XP bonus
+  const lp = levelProgress(acctXp);
+  el.sLevel.innerHTML = lp.maxed
+    ? "Level <b>" + lp.level + "</b> &middot; MAX"
+    : "Level <b>" + lp.level + "</b> &middot; " + lp.into.toFixed(1) + "/" + lp.need +
+      " XP &middot; <b style='color:#bfe3ff'>+" +
+      (lp.level * LEVEL_FOOD_BONUS * 100).toFixed(2) + "%</b> food";
 
   // danger readout: a predator is either closing in or mid-lunge
   const source = player.strikingBy || player.huntedBy;
@@ -2138,7 +2259,7 @@ function eatFood(e, dt, isPlayer){
     if (dist2(e.x,e.y,f.x,f.y) > bite*bite) continue;
     f.dead = true;
     f.respawn = rand(2, 7);
-    addXP(e, FOOD_XP);
+    addXP(e, foodXpFor(e));
     refillBoost(e, FOOD_ENERGY);
     if (f.id !== undefined) Net.foodGone.push(f.id);
     ate++;
@@ -2545,6 +2666,12 @@ cv.addEventListener("pointerdown", () => { if (!running) startGame(); });
 window.EvoQuest = {
   RANKS: RANKS, BOOST_MAX: BOOST_MAX, FOOD_XP: FOOD_XP,
   KILL_XP_SHARE: KILL_XP_SHARE, DEATH_XP_KEEP: DEATH_XP_KEEP,
+  LEVEL_CAP: LEVEL_CAP, LEVEL_REQ_0: LEVEL_REQ_0, LEVEL_GROWTH: LEVEL_GROWTH,
+  LEVEL_FOOD_BONUS: LEVEL_FOOD_BONUS, ACCT_XP_PER_XP: ACCT_XP_PER_XP,
+  levelThresholds: levelThresholds, levelForAcctXp: levelForAcctXp,
+  levelProgress: levelProgress, levelFoodBoost: levelFoodBoost,
+  awardAcctXp: awardAcctXp, foodXpFor: foodXpFor,
+  get acctXp(){ return acctXp; },
   BOOST_MULT: BOOST_MULT, NPC_SPAWN_SAFE: NPC_SPAWN_SAFE,
   PLAYER_PICKUP: PLAYER_PICKUP, PLAYER_HUNT_GAP: PLAYER_HUNT_GAP,
   SPAWN_SAFE: SPAWN_SAFE, KILL_ENERGY: KILL_ENERGY, FOOD_ENERGY: FOOD_ENERGY,

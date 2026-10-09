@@ -155,5 +155,129 @@ console.log("\naccounts never block play");
   ok("progress is still on disk after checkpointing", p.updatedAt > 0, p.updatedAt);
 }
 
+const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+console.log("\naccount level requirements");
+{
+  const t = G.levelThresholds();
+  ok("level 0 is free", t[0] === 0, t[0]);
+  ok("leaving level 0 costs exactly 10", t[1] - t[0] === 10, t[1] - t[0]);
+  ok("level 0 requirement is 10", G.LEVEL_REQ_0 === 10, G.LEVEL_REQ_0);
+  ok("growth is 1.2x", G.LEVEL_GROWTH === 1.2, G.LEVEL_GROWTH);
+
+  // the spec: each level costs 1.2x the one before, rounded to a whole number,
+  // chained through the rounded figure. 10, 12, 14 (12*1.2=14.4), 17 (14*1.2=16.8)
+  const want = [10, 12, 14, 17, 20, 24, 29, 35, 42, 50, 60, 72, 86, 103, 124, 149];
+  const got = want.map((_, L) => t[L + 1] - t[L]);
+  ok("the requirement chain is 10, 12, 14, 17, 20, 24, ...",
+     got.every((v, i) => v === want[i]), got.join(","));
+  ok("every requirement is a whole number", got.every(Number.isInteger), got.join(","));
+  ok("requirements strictly increase", got.every((v, i) => i === 0 || v > got[i-1]), got.join(","));
+  ok("thresholds are cumulative and monotonic",
+     t.every((v, i) => i === 0 || v >= t[i-1]), "non-monotonic somewhere");
+
+  ok("10 XP is level 1", G.levelForAcctXp(10) === 1, G.levelForAcctXp(10));
+  ok("9.9 XP is still level 0", G.levelForAcctXp(9.9) === 0, G.levelForAcctXp(9.9));
+  ok("22 XP is level 2", G.levelForAcctXp(22) === 2, G.levelForAcctXp(22));
+  ok("36 XP is level 3", G.levelForAcctXp(36) === 3, G.levelForAcctXp(36));
+  const p = G.levelProgress(15);
+  ok("progress reports what is banked toward the next level",
+     p.level === 1 && near(p.into, 5) && p.need === 12, `${p.level} ${p.into}/${p.need}`);
+}
+
+console.log("\naccount level cap and overflow");
+{
+  ok("the cap is level 99999", G.LEVEL_CAP === 99999, G.LEVEL_CAP);
+  const t = G.levelThresholds();
+  ok("the table covers every level up to the cap", t.length === G.LEVEL_CAP + 1, t.length);
+  ok("no threshold is Infinity", t.every(Number.isFinite), "an entry overflowed");
+  ok("no threshold is NaN", t.every(v => !Number.isNaN(v)), "an entry is NaN");
+  ok("a colossal total still resolves to the cap",
+     G.levelForAcctXp(1e300) === G.LEVEL_CAP, G.levelForAcctXp(1e300));
+  ok("Infinity does not break the lookup",
+     G.levelForAcctXp(Infinity) === G.LEVEL_CAP, G.levelForAcctXp(Infinity));
+  ok("MAX_SAFE_INTEGER does not break the lookup",
+     G.levelForAcctXp(Number.MAX_SAFE_INTEGER) === G.LEVEL_CAP, G.levelForAcctXp(Number.MAX_SAFE_INTEGER));
+  const mp = G.levelProgress(1e300);
+  ok("the cap reports itself as maxed, not as needing more XP",
+     mp.maxed === true && mp.need === 0, JSON.stringify(mp));
+}
+
+console.log("\nlevel food bonus");
+{
+  ok("level 0 has no bonus at all", G.levelFoodBoost(0) === 1, G.levelFoodBoost(0));
+  ok("the bonus is 0.05% a level", G.LEVEL_FOOD_BONUS === 0.0005, G.LEVEL_FOOD_BONUS);
+  ok("level 1 is +0.05%", near(G.levelFoodBoost(1), 1.0005), G.levelFoodBoost(1));
+  ok("level 2 is +0.10%", near(G.levelFoodBoost(2), 1.001), G.levelFoodBoost(2));
+  ok("level 10 is +0.50%", near(G.levelFoodBoost(10), 1.005), G.levelFoodBoost(10));
+  ok("the bonus scales linearly", near(G.levelFoodBoost(20), 1.01), G.levelFoodBoost(20));
+  ok("a nonsense level does not grant a negative bonus",
+     G.levelFoodBoost(-5) === 1 && G.levelFoodBoost(undefined) === 1, G.levelFoodBoost(-5));
+}
+
+console.log("\naccount XP is separate from in-game XP and never decreases");
+{
+  const startAcct = G.acctXp;
+  ok("account XP starts at 0", startAcct === 0, startAcct);
+  ok("a fresh profile has no account XP", A.blank().acctXp === 0, A.blank().acctXp);
+
+  // earning in-game XP feeds the account pool
+  const xpBefore = G.player.xp, acctBefore = G.acctXp;
+  G.addXP(G.player, 5);
+  ok("earning in-game XP raises account XP too",
+     G.acctXp > acctBefore, `${acctBefore} -> ${G.acctXp}`);
+  ok("and raises in-game XP", G.player.xp > xpBefore, G.player.xp);
+
+  // dying halves in-game XP and must not touch the account pool
+  const acctAtDeath = G.acctXp;
+  G.player.totalXp *= 0.5;
+  ok("halving in-game XP leaves account XP untouched",
+     G.acctXp === acctAtDeath, `${acctAtDeath} -> ${G.acctXp}`);
+  // that divergence is what makes these two pools rather than one number twice
+  ok("the two pools have now diverged",
+     G.acctXp !== G.player.totalXp, `acct ${G.acctXp} vs in-game ${G.player.totalXp}`);
+  G.awardAcctXp(0);
+  G.awardAcctXp(-5);
+  ok("a zero or negative award changes nothing", G.acctXp === acctAtDeath, G.acctXp);
+
+  // an older profile must never walk the total backwards
+  const now = G.acctXp;
+  G.applyProfileToGame(Object.assign(A.blank(), { acctXp: 0, rank: 0 }));
+  ok("loading a profile with less account XP does not reduce it",
+     G.acctXp === now, `${now} -> ${G.acctXp}`);
+  G.applyProfileToGame(Object.assign(A.blank(), { acctXp: now + 500 }));
+  ok("loading a higher account XP does raise it", G.acctXp === now + 500, G.acctXp);
+}
+
+console.log("\naccount level persists and merges");
+{
+  G.awardAcctXp(40);
+  const won = G.acctXp;
+  G.checkpoint();
+  const saved = A.local();
+  ok("checkpoint writes account XP to the profile", saved.acctXp >= won, `${saved.acctXp} vs ${won}`);
+
+  // pressing R wipes the run back to Plankton. The account level must survive it.
+  G.addXP(G.player, 50);
+  const beforeRestart = G.acctXp;
+  const inGameBefore = G.player.totalXp;
+  G.restart();
+  ok("restarting wipes in-game XP", G.player.totalXp < inGameBefore, G.player.totalXp);
+  ok("restarting does NOT wipe account XP",
+     G.acctXp === beforeRestart, `${beforeRestart} -> ${G.acctXp}`);
+
+  const hi = Object.assign(A.blank(), { acctXp: 900, rank: 3 });
+  const lo = Object.assign(A.blank(), { acctXp: 12, rank: 0 });
+  ok("merge keeps the larger account XP", A.merge(hi, lo).acctXp === 900, A.merge(hi, lo).acctXp);
+  ok("merge is order-independent for account XP", A.merge(lo, hi).acctXp === 900, A.merge(lo, hi).acctXp);
+  const m1 = A.merge(hi, hi);
+  const m2 = A.merge(m1, m1);
+  ok("merging repeatedly cannot inflate account XP", m2.acctXp === 900, m2.acctXp);
+
+  const junk = A.sanitize({ acctXp: "abc" });
+  ok("a corrupt account XP falls back to 0, not NaN", junk.acctXp === 0, junk.acctXp);
+  const neg = A.sanitize({ acctXp: -50 });
+  ok("a negative account XP is clamped to 0", neg.acctXp === 0, neg.acctXp);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

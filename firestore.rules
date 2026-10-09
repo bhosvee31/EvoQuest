@@ -36,7 +36,7 @@ service cloud.firestore {
     function onlyKnownFields() {
       return request.resource.data.keys().hasOnly([
         'v', 'name', 'rank', 'xp', 'totalXp', 'bestRank',
-        'kills', 'deaths', 'food', 'playSec', 'bestTimes', 'updatedAt'
+        'kills', 'deaths', 'food', 'playSec', 'acctXp', 'bestTimes', 'updatedAt'
       ]);
     }
 
@@ -44,7 +44,7 @@ service cloud.firestore {
     // (0-9) and the counters must not be negative. Deliberately no type checks
     // -- see the note at the top of this file.
     function valuesInRange() {
-      return request.resource.data.rank >= 0 && request.resource.data.rank <= 9 && request.resource.data.bestRank >= 0 && request.resource.data.bestRank <= 9 && request.resource.data.xp >= 0 && request.resource.data.totalXp >= 0 && request.resource.data.kills >= 0 && request.resource.data.deaths >= 0 && request.resource.data.food >= 0 && request.resource.data.playSec >= 0;
+      return request.resource.data.rank >= 0 && request.resource.data.rank <= 9 && request.resource.data.bestRank >= 0 && request.resource.data.bestRank <= 9 && request.resource.data.xp >= 0 && request.resource.data.totalXp >= 0 && request.resource.data.kills >= 0 && request.resource.data.deaths >= 0 && request.resource.data.food >= 0 && request.resource.data.playSec >= 0 && request.resource.data.acctXp >= 0;
     }
 
     // Creating your own profile from scratch.
@@ -63,7 +63,8 @@ service cloud.firestore {
                     && request.resource.data.kills >= resource.data.kills
                     && request.resource.data.deaths >= resource.data.deaths
                     && request.resource.data.food >= resource.data.food
-                    && request.resource.data.rank >= resource.data.rank;
+                    && request.resource.data.rank >= resource.data.rank
+                    && request.resource.data.acctXp >= resource.data.acctXp;
 
       allow read: if request.auth != null && request.auth.uid == uid;
       allow delete: if false;

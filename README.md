@@ -77,6 +77,53 @@ victim's lifetime XP** and 60% of your boost meter.
 Not built: dedicated servers, accounts, matchmaking, host migration if the host
 quits, and lag compensation. The host is trusted — it could cheat.
 
+## Account levels
+
+Alongside the in-game XP there is a second, separate pool: **account XP**. It
+belongs to the account rather than to a run, and it is deliberately independent of
+the rank ladder:
+
+- It **only ever goes up.** Nothing in the game subtracts from it — not dying, not
+  pressing `R`, not merging two profiles, not loading an older save. Dying halves
+  your in-game XP and leaves this untouched.
+- It **never feeds into ranks.** Levels are their own ladder.
+- You earn it by earning in-game XP, at `ACCT_XP_PER_XP` (1:1 by default), so
+  both food and kills count.
+
+Leaving level 0 costs **10** account XP. Each level after costs **1.2x** the level
+before, **rounded to a whole number at every step**, chained through the rounded
+figure:
+
+```
+level  0   1   2   3   4   5   6   7   8    9   10
+needs   10  12  14  17  20  24  29  35  42   50   60
+total   10  22  36  53  73  97 126 161 203  253  313
+```
+
+Level 2 is `round(12 * 1.2) = 14`, not `round(10 * 1.2 * 1.2) = 14` — the same
+number here, but they drift apart further up, and the rounded value is what the
+table chains.
+
+Every level buys **+0.05% food XP**, permanently: level 0 has none, level 1 is
+`x1.0005`, level 10 is `x1.005`, level 100 is `x1.05`. The bonus applies to food
+only, not to kill payouts, and only to the player — NPCs have no account.
+
+The cap is **level 99999**. That is unreachable in practice: the exact
+requirement up there is around `1e7917`, well past the largest representable
+double. So `levelThresholds()` clamps instead of overflowing, which means a
+profile claiming an absurd total resolves to the cap rather than producing
+`Infinity`. The table is built once, lazily, on first use (~1ms for 100,000
+entries) and cached.
+
+Because the chain is rounded at every step it cannot be closed-form'd with
+logarithms, hence the table.
+
+One judgement call worth flagging: the request was for registered accounts, but
+account XP is stored on the profile like everything else, so it also works with no
+account at all and syncs to Firestore when you do sign in. Gating it behind sign-in
+would have made the whole feature invisible in single-player and from `file://`,
+which is the one thing this game does not gate.
+
 ## Accounts and saved progress
 
 Progress **always saves to this device**, with no account and no network. Open
@@ -147,8 +194,9 @@ rather than one overwriting the other:
 - **Progression** (rank, XP) comes from whichever profile is further along the
   ladder — measured by summing the XP needed to reach that rank and adding what
   is banked toward the next one
-- **Counters** (kills, deaths, food, playtime, lifetime XP) take the **larger**
-  value, never the sum, so merging the same device twice changes nothing
+- **Counters** (kills, deaths, food, playtime, lifetime XP, account XP) take the
+  **larger** value, never the sum, so merging the same device twice changes
+  nothing
 - **Best times** per rank keep the faster of the two
 
 Merging is deliberately idempotent so that signing in repeatedly can't inflate
@@ -321,13 +369,14 @@ Everything in `tools/` is a development aid and is **not** needed to play or
 deploy the game. None of it ships inside `index.html`.
 
 ```powershell
-# 87 assertions covering the rules, plus balance simulations
+# 98 assertions covering the rules, plus balance simulations
 node tools\headless-test.mjs
 
-# 47 assertions: full host/join flow against a stand-in PeerJS
+# 49 assertions: full host/join flow against a stand-in PeerJS
 node tools\multiplayer-e2e-test.mjs
 
-# 41 assertions: local profile, tampered-storage sanitising, merge policy
+# 87 assertions: local profile, tampered-storage sanitising, merge policy,
+                        account level maths, cap and overflow safety, monotonicity
 node tools\account-test.mjs
 
 # is the Firebase config filled in and does the game still boot?
@@ -377,7 +426,7 @@ tools/
   harness.mjs           DOM stub + software canvas + PNG encoder
   headless-test.mjs     rule, AI and balance tests
   multiplayer-e2e-test.mjs  real host()/join()/wrap() against a fake PeerJS
-  account-test.mjs      profile save/load, sanitising, merge policy
+  account-test.mjs      profile save/load, sanitising, merge policy, account levels
   check-firebase.mjs    is FB_CONFIG filled in and does the game still boot?
   rules-lint.mjs        Firestore rules: Rules-language syntax + field-list match
   death-diagnostic.mjs  deaths/progression measurement over many runs
