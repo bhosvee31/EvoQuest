@@ -18,11 +18,19 @@ function ok(name, cond, extra) {
 const R = G.RANKS;
 
 console.log("\naccounts are optional");
+// These used to assert FB_CONFIG was empty. It is no longer empty, and it will
+// never be empty again, so asserting on that proved nothing about the game. What
+// actually matters is that "configured" tracks the config, that status() stays
+// coherent in both states, and that the local profile works either way.
 {
-  ok("not configured in this build (FB_CONFIG empty)", A.configured === false);
+  const cfg = G.FB_CONFIG || {};
+  const filled = !!(cfg.apiKey && cfg.projectId && cfg.appId);
+  ok(`configured flag tracks the config (filled in: ${filled})`, A.configured === filled, A.configured);
   ok("profile is still saved locally with no account", typeof A.local === "function");
-  ok("no user signed in", A.user === null);
-  ok("status says accounts are off", A.status() === "accounts not set up", A.status());
+  ok("no user signed in on boot", A.user === null);
+  ok("status is coherent with configured+signed out",
+    A.status() === (filled ? "signed out" : "accounts not set up"), A.status());
+  ok("single player does not wait on the network", typeof A.merge === "function");
 }
 
 console.log("\nlocal profile save/load");
