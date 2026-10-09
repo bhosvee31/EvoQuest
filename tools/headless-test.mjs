@@ -4,7 +4,7 @@
 //
 // Boots index.html's game script in a stubbed DOM (see harness.mjs) and
 // exercises the actual rules: floor-food XP, rank-up thresholds, eating lower
-// ranks, the 30% kill share, the 50% death penalty and the boost meter.
+// ranks, the kill share, the 50% death penalty and the boost meter.
 //
 // Not shipped with the game - a development aid only.
 
@@ -74,7 +74,7 @@ console.log("\nsprite data");
   ok("every rank threshold is a whole number of food pieces",
      R.every(r => Math.abs(r.need / G.FOOD_XP - Math.round(r.need / G.FOOD_XP)) < 1e-9),
      R.map(r => r.need / G.FOOD_XP).join(","));
-  ok("kill share is 30%", G.KILL_XP_SHARE === 0.30, G.KILL_XP_SHARE);
+  ok("kill share is 25%", G.KILL_XP_SHARE === 0.25, G.KILL_XP_SHARE);
   ok("death keeps 50%", G.DEATH_XP_KEEP === 0.5, G.DEATH_XP_KEEP);
   ok("boost caps at 5s", G.BOOST_MAX === 5, G.BOOST_MAX);
 }
@@ -160,7 +160,7 @@ console.log("\nhunting lower ranks");
   victim.xp = 4.0; victim.totalXp = 4.0;
   step(2);
   ok("Butterfly eats Plankton", G.player.kills === 1, G.player.kills);
-  ok("kill grants 30% of the victim's XP (1.2)", near(G.player.xp, 1.2), G.player.xp);
+  ok("kill grants 25% of the victim's XP (1.0)", near(G.player.xp, 4.0 * G.KILL_XP_SHARE), G.player.xp);
   ok("victim is marked dead", victim.dead === true);
 }
 {
@@ -171,10 +171,10 @@ console.log("\nhunting lower ranks");
   const veteran = spawnNpc(0, 1, 0);
   veteran.xp = 0.4; veteran.totalXp = 60.0;
   step(2);
-  // 30% of 60 == 18. Assert on the lifetime total: the bar may have already
+  // 25% of 60 == 15. Assert on the lifetime total: the bar may have already
   // spent part of it on a promotion.
   ok("kill pays out on lifetime XP, not the current-rank bar",
-     near(G.player.totalXp, 18.0), `${G.player.totalXp} (bar now ${G.player.xp}, rank ${G.player.rank})`);
+     near(G.player.totalXp, 60.0 * G.KILL_XP_SHARE), `${G.player.totalXp} (bar now ${G.player.xp}, rank ${G.player.rank})`);
 }
 {
   clearField(); clearNPCs(); resetPlayer();
@@ -183,7 +183,7 @@ console.log("\nhunting lower ranks");
   victim.xp = 2.0; victim.totalXp = 2.0;
   step(2);
   ok("Vampire eats Crab", G.player.kills === 1, G.player.kills);
-  ok("kill grants 30% (0.6)", near(G.player.xp, 0.6), G.player.xp);
+  ok("kill grants 25% (0.5)", near(G.player.xp, 2.0 * G.KILL_XP_SHARE), G.player.xp);
 }
 {
   clearField(); clearNPCs(); resetPlayer();
@@ -191,6 +191,29 @@ console.log("\nhunting lower ranks");
   const rival = spawnNpc(2, 1, 0);                    // same rank
   step(4);
   ok("equal ranks cannot eat each other", G.player.kills === 0 && G.player.deaths === 0 && !rival.dead);
+}
+
+console.log("\nNPCs carry XP consistent with their rank");
+// NPCs spawn straight into a weighted rank instead of evolving into it. They
+// used to start at 0 lifetime XP regardless, so a Crab wore a Crab sprite while
+// carrying less XP than a Fish, and paid out like everything else. A kill is
+// worth a share of the victim's lifetime total, so this had to be seeded.
+{
+  clearField(); resetPlayer();
+  G.rebuildWorldFromSeed(12345);
+  const floorOf = (rank) => G.RANKS.slice(0, rank).reduce((s, r) => s + r.need, 0);
+  const npcs = G.critters.filter(c => !c.isPlayer);
+  ok("world populated with NPCs", npcs.length > 0, npcs.length);
+  const below = npcs.filter(c => c.totalXp < floorOf(c.rank) - 1e-9);
+  ok("every NPC's lifetime XP covers the ranks below it", below.length === 0,
+     below.length ? `${below.length} below floor, e.g. ${below[0].label} rank ${below[0].rank} total ${below[0].totalXp.toFixed(1)} floor ${floorOf(below[0].rank)}` : "");
+  const overBar = npcs.filter(c => c.xp >= G.RANKS[c.rank].need);
+  ok("no NPC spawns already past its own threshold", overBar.length === 0, overBar.length);
+  ok("a high-rank NPC is worth far more than a low-rank one",
+     npcs.some(c => c.rank >= 4 && c.totalXp > 30) && npcs.some(c => c.rank <= 1 && c.totalXp < 12),
+     "want a rank 4+ over 30 XP and a rank 1 or under under 12 XP");
+  ok("the player still starts at zero XP",
+     G.player.xp === 0 && G.player.totalXp === 0, `${G.player.xp}/${G.player.totalXp}`);
 }
 
 console.log("\nbeing eaten");
@@ -207,7 +230,7 @@ console.log("\nbeing eaten");
   ok("player is dead", G.player.dead === true);
   ok("death halves the LIFETIME total (40 -> 20)", near(G.player.totalXp, 20.0), G.player.totalXp);
   ok("death also halves the current-rank bar (6 -> 3)", near(G.player.xp, 3.0), G.player.xp);
-  ok("killer gains 30% of the player's lifetime XP (12)", near(killer.xp, 12.0), killer.xp);
+  ok("killer gains 25% of the player's lifetime XP (10)", near(killer.xp, 40.0 * G.KILL_XP_SHARE), killer.xp);
 }
 {
   // escaping during the windup must actually work

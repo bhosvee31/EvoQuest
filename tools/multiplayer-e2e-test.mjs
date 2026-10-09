@@ -229,9 +229,19 @@ console.log("\nhost resolves PvP between two remote players");
   predator.x = victim.x; predator.y = victim.y;
   B.player.rank = 8; B.player.invuln = 0;
   A.player.rank = 1; A.player.invuln = 0; A.player.xp = 4; A.player.totalXp = 40;
+  // the host does the killing and pays out of the victim's lifetime total, so it
+  // needs that total to have arrived over the wire. It used to never be sent, so
+  // every PvP kill was worth a quarter of nothing.
+  const predBefore = predator.totalXp;
+  for (let i = 0; i < 8; i++){ A.step(1 / 60); await settle(); }
 
   for (let i = 0; i < 150 && !victim.dead; i++){ H.step(1 / 60); await settle(); }
   await settleN(4);
+  const paid = predator.totalXp - predBefore;
+  const want = 40 * H.KILL_XP_SHARE;
+  ok("the host received the victim's real lifetime XP", victim.totalXp === 40, victim.totalXp);
+  ok("the predator was paid a quarter of the victim's lifetime total",
+     Math.abs(paid - want) < 0.05, `+${paid.toFixed(2)} expected ${want.toFixed(2)}`);
   ok("the predator killed the victim on the host", victim.dead === true, `dead=${victim.dead}`);
   ok("the victim's client was told it died", A.player.deaths >= 1, A.player.deaths);
   ok("the victim's lifetime XP was halved", A.player.totalXp === 20, A.player.totalXp);

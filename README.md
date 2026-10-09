@@ -71,7 +71,7 @@ players, and food removals/respawns travel over the wire.
 
 Rules apply between players exactly as between creatures: eat anything below
 your rank, and any higher rank can eat you — including the **0.6s wind-up**
-warning and the 50%-of-lifetime-XP death penalty. PvP kills pay **30% of the
+warning and the 50%-of-lifetime-XP death penalty. PvP kills pay **25% of the
 victim's lifetime XP** and 60% of your boost meter.
 
 Not built: dedicated servers, accounts, matchmaking, host migration if the host
@@ -207,10 +207,18 @@ into the new rank. Once you're a Vampire the bar keeps filling as a score.
 **higher** rank can eat you. Equal ranks are harmless to each other. Touching is
 instant death for the loser — there is no health bar.
 
-**Killing** a creature transfers **30% of everything it has ever earned** — its
+**Killing** a creature transfers **25% of everything it has ever earned** — its
 lifetime XP, not just what is sitting in its bar for its current rank — plus
 **60% of your boost meter**. Hunting is by far the fastest route to both XP and
 a boost burst, and old creatures are worth a lot.
+
+Because a kill pays out of the victim's lifetime total, every creature's total
+has to be consistent with the rank it is wearing. NPCs spawn straight into a
+weighted rank instead of evolving into it, so they are seeded with the XP their
+rank implies (5+7+9+12 = 33 for a Crab, and so on) plus a little progress into
+that rank. Otherwise a Crab would carry less XP than a Fish and every kill would
+be worth roughly the same. `xpFloor(rank)` in `index.html` is the single place
+that arithmetic lives.
 
 **Dying** costs you half of your entire XP estate: your lifetime total *and* the
 progress banked toward your current rank are both cut in half. You respawn after

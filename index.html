@@ -283,7 +283,7 @@
       <li><b>Move</b> &mdash; your creature walks toward your cursor.</li>
       <li><b>Boost</b> &mdash; hold <b>left click</b> or <b>Spacebar</b> for a speed burst.</li>
       <li><b>Eat</b> &mdash; floor food is <b>0.2 XP</b> and nudges your boost. You may eat anything <b>below</b> your rank.</li>
-      <li><b>Hunt</b> &mdash; killing another creature gives you <b>30%</b> of everything it ever earned, plus most of your boost.</li>
+      <li><b>Hunt</b> &mdash; killing another creature gives you <b>25%</b> of everything it ever earned, plus most of your boost.</li>
       <li><b>Survive</b> &mdash; if you are eaten you keep <b>50%</b> of all your XP, lifetime total included.</li>
     </ol>
     <button id="go">ENTER THE FOOD CHAIN</button>
@@ -622,7 +622,7 @@ const KILL_ENERGY  = 3.0;   // boost seconds per kill = 60% of the meter. Huntin
                              // is meant to be the fast route to a boost burst;
                              // note a Plankton (rank 1) has nothing below it to
                              // kill, so it can only ever boost from foraging
-const KILL_XP_SHARE= 0.30;  // share of victim's xp taken
+const KILL_XP_SHARE= 0.25;  // share of victim's lifetime xp taken
 const DEATH_XP_KEEP= 0.5;   // xp retained after being eaten
 const RESPAWN_TIME = 2.4;
 const SPAWN_SAFE  = 5.0;    // seconds of protection after (re)spawning
@@ -797,7 +797,7 @@ const Accounts = {
       name: "Player",
       rank: 0,
       xp: 0,
-      totalXp: 0,
+totalXp: 0,
       bestRank: 0,
       kills: 0,
       deaths: 0,
@@ -1277,7 +1277,7 @@ const Net = {
     this.inputAcc = t;
     if (this.mode !== "client" || !this.conn) return;
     this.conn.send({ t: "in", x: Math.round(input.mx + cam.x), y: Math.round(input.my + cam.y),
-                     b: !!(input.down || input.space), r: player.rank });
+                     b: !!(input.down || input.space), r: player.rank, xp: Math.round(player.totalXp * 10) / 10 });
   }
 };
 
@@ -1300,6 +1300,9 @@ const NetHooks = {
     if (!p) return;
     p.input.x = msg.x; p.input.y = msg.y; p.input.b = msg.b;
     if (typeof msg.r === "number") p.wantRank = msg.r;
+    /* the host does the killing, so it needs the victim's real lifetime total to
+       pay out of -- otherwise every PvP kill is worth 25% of nothing */
+    if (typeof msg.xp === "number" && msg.xp >= 0) p.totalXp = msg.xp;
   },
   snap(msg){
     if (Net.mode !== "client") return;
@@ -1429,14 +1432,29 @@ let cam = { x:0, y:0 };
 let time = 0, running = false, paused = false;
 let hudTick = 0;
 
+/* The lifetime XP every rank implies. A creature cannot be rank R without
+   having earned everything ranks 0..R-1 cost, so this is the floor its totalXp
+   must sit at. NPCs spawn straight into a rank instead of evolving into it, so
+   without this they would carry a totalXp of 0 while wearing a Crab sprite --
+   and a kill pays out of totalXp, so a Crab would be worth the same 3 XP as
+   anything else. */
+function xpFloor(rank){
+  let s = 0;
+  for (let i = 0; i < rank; i++) s += RANKS[i].need;
+  return s;
+}
+
 function makeCritter(rank, x, y, isPlayer){
   const sp = SPRITES[RANKS[rank].key];
+  /* a little progress into the current rank, kept below the threshold so it can
+     never tip an NPC over into the next rank on its first frame */
+  const into = isPlayer ? 0 : rand(0, RANKS[rank].need * 0.8);
   return {
     id: ++critterSeq,
     isPlayer: !!isPlayer,
     isNet: false,
     rank: rank,
-    xp: 0,
+    xp: into,
     x: x, y: y,
     vx: 0, vy: 0,
     r: sp.w * SCALE * 0.34,
@@ -1452,7 +1470,7 @@ function makeCritter(rank, x, y, isPlayer){
     dead: false, deadT: 0,
     state: "wander", target: null, think: rand(0,1),
     wanderAng: rand(0, TAU), wanderT: 0,
-    totalXp: 0,
+    totalXp: xpFloor(rank) + into,
     kills: 0, deaths: 0, foodEaten: 0,
     bestRank: rank,
     label: isPlayer ? "You" : RANKS[rank].name
