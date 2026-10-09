@@ -1107,6 +1107,7 @@ const Net = {
   inputAcc: 0,
   ready: false,
   hostId: 0,
+  nextId: 0,           // peer ids start at 1; 0 is reserved for the host
   libPromise: null,
   foodGone: [],       // food ids eaten this frame
   foodAdded: [],     // food that respawned this frame
@@ -1177,7 +1178,7 @@ const Net = {
       const id = ++this.nextId;
       t.peerId = id;
       this.peers.set(id, {
-        isPlayer: true, isNet: true, id: id, name: "Player " + id,
+        isPlayer: true, isNet: true, id: id, name: "Player " + id, conn: t,
         rank: 0, xp: 0, totalXp: 0, x: WORLD.w / 2, y: WORLD.h / 2,
         vx: 0, vy: 0, r: 20, face: 1, wobble: 0, boost: BOOST_MAX,
         boosting: false, invuln: SPAWN_SAFE, huntedBy: null, strikeT: 0,
@@ -1194,7 +1195,11 @@ const Net = {
   dropPeer(t){
     this.conns = this.conns || new Map();
     for (const [id, p] of this.peers){
-      if (p.conn === t){ this.peers.delete(id); pushFeed(p.name + " left", "death"); }
+      if (p.conn === t){
+        this.peers.delete(id);
+        pushFeed(p.name + " left", "death");
+        if (Net.mode === "host") this.broadcast({ t: "bye", id: id });
+      }
     }
     this.conns.delete(t);
     t.close();
@@ -2530,7 +2535,7 @@ window.EvoQuest = {
   restart: restart,
   step: update,
   setPaused: function(v){ paused = !!v; },
-  spawnFoodAt: spawnFood, eatFood: eatFood,
+  spawnFoodAt: spawnFood, eatFood: eatFood, flushFoodEvents: flushFoodEvents,
   addXP: addXP,
   kill: kill
 };

@@ -305,8 +305,8 @@ deploy the game. None of it ships inside `index.html`.
 # 87 assertions covering the rules, plus balance simulations
 node tools\headless-test.mjs
 
-# 37 assertions: two real game instances talking over a loopback transport
-node tools\multiplayer-test.mjs
+# 47 assertions: full host/join flow against a stand-in PeerJS
+node tools\multiplayer-e2e-test.mjs
 
 # 41 assertions: local profile, tampered-storage sanitising, merge policy
 node tools\account-test.mjs
@@ -357,7 +357,7 @@ tools/
   sprite-widths.ps1     per-row width audit
   harness.mjs           DOM stub + software canvas + PNG encoder
   headless-test.mjs     rule, AI and balance tests
-  multiplayer-test.mjs  two peers, join/snapshot/PvP/food-credit/leaving
+  multiplayer-e2e-test.mjs  real host()/join()/wrap() against a fake PeerJS
   account-test.mjs      profile save/load, sanitising, merge policy
   check-firebase.mjs    is FB_CONFIG filled in and does the game still boot?
   rules-lint.mjs        Firestore rules: Rules-language syntax + field-list match

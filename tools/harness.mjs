@@ -348,7 +348,11 @@ export function boot(opts = {}) {
   const sandbox = {
     console, Math, JSON, Date, Uint8ClampedArray, Object, Array, String, Number, Boolean,
     isNaN, parseInt, parseFloat, Int32Array, Uint8Array,
-    setTimeout: (fn) => { fn(); return 0; }, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
+    // Real timers. The game uses setTimeout for connect timeouts, the offline
+    // download, audio and feed fade-out. unref() so they never keep node alive.
+    setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); if (t.unref) t.unref(); return t; },
+    clearTimeout: (t) => { clearTimeout(t); },
+    setInterval: () => 0, clearInterval: () => {},
     requestAnimationFrame: (fn) => { rafQueue.push(fn); return rafQueue.length; },
     devicePixelRatio: 1, innerWidth: width, innerHeight: height,
     AudioContext: undefined,
@@ -361,6 +365,9 @@ export function boot(opts = {}) {
     },
     performance: clock,
     localStorage,
+    // Globals to inject before the game script runs. Used to stand in for
+    // libraries it would otherwise download (PeerJS, Firebase).
+    ...(opts.globals || {}),
     __store: store
   };
   sandbox.window = sandbox;
