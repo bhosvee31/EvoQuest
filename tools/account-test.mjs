@@ -243,8 +243,10 @@ console.log("\nthe 1.1x chain holds across the whole cap, not just the low level
 
 console.log("\naccount level cap and overflow");
 {
-  ok("the cap is a real level, derived from the arithmetic",
-     Number.isInteger(G.LEVEL_CAP) && G.LEVEL_CAP > 1000, G.LEVEL_CAP);
+  ok("the cap is level 7000", G.LEVEL_CAP === 7000, G.LEVEL_CAP);
+  ok("the arithmetic would allow more, and the cap sits below it",
+     Number.isInteger(G.LEVEL_ARITHMETIC_MAX) && G.LEVEL_ARITHMETIC_MAX > G.LEVEL_CAP,
+     `cap ${G.LEVEL_CAP}, arithmetic max ${G.LEVEL_ARITHMETIC_MAX}`);
   const t = G.levelThresholds();
   ok("the table holds the cap and the unreachable level after it",
      t.length === G.LEVEL_CAP + 2, t.length);
@@ -252,8 +254,9 @@ console.log("\naccount level cap and overflow");
   ok("every real threshold is finite",
      t.slice(1, G.LEVEL_CAP + 1).every(Number.isFinite), "an entry overflowed");
   ok("no threshold is NaN", t.every(v => !Number.isNaN(v)), "an entry is NaN");
-  ok("the cap's own threshold is the largest a double can hold",
-     G.levelThreshold(G.LEVEL_CAP) <= Number.MAX_VALUE, G.levelThreshold(G.LEVEL_CAP));
+  ok("the cap's own threshold is a real, finite, enormous amount",
+     Number.isFinite(G.levelThreshold(G.LEVEL_CAP)) &&
+     G.levelThreshold(G.LEVEL_CAP) > 1e250, G.levelThreshold(G.LEVEL_CAP));
   ok("the level AFTER the cap has an infinite threshold",
      G.levelThreshold(G.LEVEL_CAP + 1) === Infinity, G.levelThreshold(G.LEVEL_CAP + 1));
   ok("so leaving the cap costs infinite XP and can never be done",
@@ -261,9 +264,17 @@ console.log("\naccount level cap and overflow");
   ok("but leaving the level below it is an ordinary finite amount",
      Number.isFinite(G.levelRequirement(G.LEVEL_CAP - 1)) &&
      G.levelRequirement(G.LEVEL_CAP - 1) > 0, G.levelRequirement(G.LEVEL_CAP - 1));
-  ok("a colossal total still resolves below the cap, not straight to it",
-     G.levelForAcctXp(1e300) > 1000 && G.levelForAcctXp(1e300) < G.LEVEL_CAP,
-     G.levelForAcctXp(1e300));
+
+  // the whole point of capping the level count rather than the thresholds: every
+  // level below the cap still costs its true 1.1x, none are frozen at zero
+  ok("no level below the cap reports a zero requirement",
+     Array.from({length: G.LEVEL_CAP}, (_, L) => L)
+        .every(L => G.levelRequirement(L) > 0), "some level has need 0");
+  ok("and they all keep the 1.1x ratio right up to the top",
+     near(G.levelRequirement(G.LEVEL_CAP - 1) / G.levelRequirement(G.LEVEL_CAP - 2), 1.1, 1e-9) &&
+     near(G.levelRequirement(3500) / G.levelRequirement(3499), 1.1, 1e-9) &&
+     near(G.levelRequirement(1000) / G.levelRequirement(999), 1.1, 1e-9),
+     "ratio drifts somewhere below the cap");
   ok("Infinity does not break the lookup",
      G.levelForAcctXp(Infinity) === G.LEVEL_CAP, G.levelForAcctXp(Infinity));
   ok("MAX_SAFE_INTEGER does not break the lookup",
@@ -286,14 +297,17 @@ console.log("\naccount level cap and overflow");
      G.levelForAcctXp(Infinity) === G.LEVEL_CAP &&
      G.levelProgress(Infinity).maxed === true && G.levelProgress(Infinity).need === 0,
      JSON.stringify(G.levelProgress(Infinity)));
-  ok("so does the largest double there is -- that IS the top of the ladder",
+  ok("so does the largest double there is -- past the cap's threshold",
      G.levelForAcctXp(Number.MAX_VALUE) === G.LEVEL_CAP &&
      G.levelProgress(Number.MAX_VALUE).maxed === true,
      `${G.levelForAcctXp(Number.MAX_VALUE)} vs cap ${G.LEVEL_CAP}`);
-  ok("a merely colossal total is a real level with room left, not a fake cap",
-     G.levelProgress(1e300).maxed === false && G.levelProgress(1e300).level > 1000 &&
-     G.levelForAcctXp(1e300) < G.LEVEL_CAP,
-     JSON.stringify(G.levelProgress(1e300)).slice(0, 60));
+  ok("anything past the cap's threshold saturates at the cap, never beyond",
+     [1e292, 1e300, 1e305, Number.MAX_VALUE].every(x => G.levelForAcctXp(x) === G.LEVEL_CAP),
+     [1e292, 1e300].map(x => G.levelForAcctXp(x)).join(", "));
+  ok("a total below the cap's threshold is a real level with room left",
+     G.levelForAcctXp(1e291) < G.LEVEL_CAP &&
+     G.levelProgress(1e291).maxed === false && G.levelProgress(1e291).level > 6000,
+     JSON.stringify(G.levelProgress(1e291)).slice(0, 60));
 }
 
 console.log("\nlevel food bonus");

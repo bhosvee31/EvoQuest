@@ -659,8 +659,10 @@ const STRIKE_TIME   = 0.6;  // telegraph before a creature that is touching you
    MAX_SAFE_INTEGER to stop them overflowing. The clamp did exactly what it said
    and quietly destroyed the feature: every level from 181 up reported a
    requirement of 0, and 9.00e15 XP gave level 180 while 9.01e15 gave level 99999.
-   So the cap is now *derived* -- it is the last level whose threshold a double can
-   still hold, and the level after it is genuinely Infinity. */
+
+   The thresholds themselves are never clamped, because that is the mistake that
+   cost everything above level 181. Only the *count* of levels is capped, so every
+   real level keeps its true 1.1x cost right up to the top. */
 const LEVEL_REQ_0      = 10;
 const LEVEL_GROWTH     = 1.1;
 const LEVEL_FOOD_BONUS = 0.0005;   // +0.05% food XP per level, none at level 0
@@ -668,11 +670,11 @@ const ACCT_XP_PER_XP   = 1;        // account XP earned per in-game XP earned
 
 /* Below this level the chain is built with exact integer arithmetic, so the
    "round to a whole number" rule is honoured literally. Above it the rounding is
-   meaningless against numbers near 1e308 anyway, and the closed form takes over. */
+   meaningless against numbers near 1e292 anyway, and the closed form takes over. */
 const LEVEL_EXACT_UNTIL = 200;
 
 /* Run the exact chain once up front. It yields both the seed the closed form needs
-   and the numbers used to derive the cap. */
+   and the numbers used to work out where the arithmetic gives out. */
 const levelSeed = (function(){
   let req = LEVEL_REQ_0, cum = 0;
   for (let L = 0; L < LEVEL_EXACT_UNTIL; L++){
@@ -682,13 +684,20 @@ const levelSeed = (function(){
   return { logA: Math.log10(req / (LEVEL_GROWTH - 1)), cum: cum, req: req };
 })();
 
-/* The highest level whose threshold is still a finite double. Threshold(L) is
-   logA + (L - 200) * log10(1.1) in log space, so this is just the point where that
-   runs past log10(Number.MAX_VALUE). One level further costs more XP than can
-   exist, so its threshold is Infinity and no amount of progress reaches it. */
-const LEVEL_CAP = Math.floor(
+/* Where a double genuinely runs out. Threshold(L) is logA + (L - 200) * log10(1.1)
+   in log space, so this is just the point that passes log10(Number.MAX_VALUE). At
+   1.1x growth that is level 7398, costing about 1.67e308 -- the most XP that can
+   exist. Anything past it is unreachable no matter what the cap says. */
+const LEVEL_ARITHMETIC_MAX = Math.floor(
   (Math.log10(Number.MAX_VALUE) - levelSeed.logA) / Math.log10(LEVEL_GROWTH)
 ) + LEVEL_EXACT_UNTIL;
+
+/* The cap is a round 7000 rather than that 7398, chosen so the top of the ladder
+   is a memorable number. The two are close enough that no real progression is lost:
+   level 7000 still costs a finite 5.7e291. Taking the min with the arithmetic
+   maximum means that if the growth rate is ever raised enough to push past what a
+   double holds, the cap follows it down instead of quietly overflowing. */
+const LEVEL_CAP = Math.min(7000, LEVEL_ARITHMETIC_MAX);
 
 let _levelLog = null;
 function levelThresholds(){
@@ -2725,6 +2734,7 @@ window.EvoQuest = {
   RANKS: RANKS, BOOST_MAX: BOOST_MAX, FOOD_XP: FOOD_XP,
   KILL_XP_SHARE: KILL_XP_SHARE, DEATH_XP_KEEP: DEATH_XP_KEEP,
   LEVEL_CAP: LEVEL_CAP, LEVEL_REQ_0: LEVEL_REQ_0, LEVEL_GROWTH: LEVEL_GROWTH,
+  LEVEL_ARITHMETIC_MAX: LEVEL_ARITHMETIC_MAX,
   LEVEL_FOOD_BONUS: LEVEL_FOOD_BONUS, ACCT_XP_PER_XP: ACCT_XP_PER_XP,
   levelThresholds: levelThresholds, levelForAcctXp: levelForAcctXp,
   levelProgress: levelProgress, levelFoodBoost: levelFoodBoost,

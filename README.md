@@ -108,27 +108,38 @@ Every level buys **+0.05% food XP**, permanently: level 0 has none, level 1 is
 `x1.0005`, level 10 is `x1.005`, level 100 is `x1.05`. The bonus applies to food
 only, not to kill payouts, and only to the player — NPCs have no account.
 
-### The cap is derived, not chosen
+### The cap is 7000
 
-The cap is **level 7398**, and it is not a round number because it is not a
-decision — it is wherever a `double` runs out. The ladder grows by 1.1 a level
-forever, so it does not fit: level 99999 would cost around `1e7920`, while the
-largest representable double is `1.8e308`.
+The cap is **level 7000**, and the level after it costs `Infinity`:
 
-- **level 7398** costs `1.667e308` — a real, finite, purchasable threshold
-- **level 7399** costs `Infinity`, and is unreachable by definition
+```
+level 6999  needs 5.084e+290
+level 7000  needs 5.593e+291   <- a real, finite, purchasable threshold
+level 7001  needs Infinity     <- unreachable by definition
+```
 
-`LEVEL_CAP` is computed as the largest level whose threshold still fits in a
-double, and the table holds one extra slot so the level past the cap genuinely
-reads as `Infinity` rather than being quietly clamped.
+It is a round number on purpose, so the top of the ladder is memorable. The
+arithmetic would actually allow **7398** — that is where a `double` runs out, since
+level 7398 costs `1.67e308` and the largest representable double is `1.8e308`.
+Pinning 7000 costs nothing real: `LEVEL_ARITHMETIC_MAX` is exposed for exactly
+that reason, and `LEVEL_CAP` is `Math.min(7000, LEVEL_ARITHMETIC_MAX)`, so raising
+the growth rate enough to push past what a double can hold would drag the cap down
+with it rather than quietly overflowing.
+
+The distinction that matters: **only the count of levels is capped, never the
+thresholds.** An earlier version clamped the thresholds themselves at
+`MAX_SAFE_INTEGER`, which is what froze every level above 181 at a requirement of
+0 and put a cliff from level 180 straight to the cap. Here every level 0..7000
+keeps its true 1.1x cost, asserted across the whole range.
 
 Thresholds are stored as `log10` of the cumulative total and compared in log
 space. Consecutive levels differ by about `0.041` in log10, which is far finer
-than a double needs to tell them apart.
+than a double needs to tell them apart. The table holds 7002 entries: 7001 real
+levels, plus level 0 and the unreachable one.
 
 Below **level 200** the chain is built exactly, one `Math.round` step at a time, so
 the "round to a whole number" rule is honoured literally. Above that the rounding
-is meaningless against numbers near `1e308`, and a geometric series seeded from the
+is meaningless against numbers near `1e292`, and a geometric series seeded from the
 exact chain takes over.
 
 The seed matters more than it looks. A naive closed form of `10 * 1.1^L` is wrong
@@ -138,9 +149,8 @@ deficit. **Level 1426** is the first level costing at least a decillion —
 `1.059e60`, against `1.062e60` from the unrounded form. Seeding from the exact
 chain at the handover reproduces it to float precision (`~1e-10` relative).
 
-In practice account XP is a `double`, so the reachable ceiling lands where the
-numbers do: `1e300` XP is about **level 7392**, and the full `1.8e308` is exactly
-the cap.
+Where totals land: `1e100` XP is level 2367, `1e200` is 4783, `1e291` is 6981, and
+anything past `~5.6e291` is level 7000.
 
 Because the chain rounds at every step it cannot be closed-form'd with
 logarithms, hence the 100,000-entry table — built lazily on first use (~1ms) and
@@ -403,7 +413,7 @@ node tools\headless-test.mjs
 # 49 assertions: full host/join flow against a stand-in PeerJS
 node tools\multiplayer-e2e-test.mjs
 
-# 103 assertions: local profile, tampered-storage sanitising, merge policy,
+# 106 assertions: local profile, tampered-storage sanitising, merge policy,
                         account level maths, cap and overflow safety, monotonicity
 node tools\account-test.mjs
 
