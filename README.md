@@ -108,15 +108,34 @@ Every level buys **+0.05% food XP**, permanently: level 0 has none, level 1 is
 `x1.0005`, level 10 is `x1.005`, level 100 is `x1.05`. The bonus applies to food
 only, not to kill payouts, and only to the player — NPCs have no account.
 
-The cap is **level 99999**. That is unreachable in practice: the exact
-requirement up there is around `1e7917`, well past the largest representable
-double. So `levelThresholds()` clamps instead of overflowing, which means a
-profile claiming an absurd total resolves to the cap rather than producing
-`Infinity`. The table is built once, lazily, on first use (~1ms for 100,000
-entries) and cached.
+The cap is **level 99999**. That is unreachable in practice, and reaching it is
+not a matter of patience: **level 746** costs `1.136e60` — one decillion — and the
+levels either side of it cost `9.466e59` and `1.363e60`. The cap itself would cost
+around `1e7920`. Since that is far past the largest representable double
+(`1.8e308`), thresholds are stored as `log10` of the cumulative total rather than
+the total itself, and compared in log space. Consecutive levels differ by about
+`0.079` in log10, ten orders of magnitude more than a double needs to tell them
+apart.
 
-Because the chain is rounded at every step it cannot be closed-form'd with
-logarithms, hence the table.
+Below **level 200** the chain is built exactly, one `Math.round` step at a time, so
+the "round to a whole number" rule is honoured literally. Above that the rounding
+is meaningless against numbers near `1e60`, and a geometric series seeded from the
+exact chain takes over.
+
+The seed matters more than it looks. A naive closed form of `10 * 1.2^L` is wrong
+by a **constant 3.24%** at every level above ~100, because the rounding is
+*chained*: the early round-downs (14.4 → 14) compound, and every later step
+inherits the deficit. Level 746 is `1.136e60`, not the `1.173e60` the unrounded
+form gives. Seeding from the exact chain at the handover reproduces it to float
+precision (`~6e-15` relative).
+
+In practice account XP is a `double`, so the ceiling is whatever a double can hold:
+`1e308` XP works out to about **level 3868**. Levels beyond that exist in the table
+but cannot be bought, and are reported as maxed rather than as `NaN`.
+
+Because the chain rounds at every step it cannot be closed-form'd with
+logarithms, hence the 100,000-entry table — built lazily on first use (~1ms) and
+cached.
 
 One judgement call worth flagging: the request was for registered accounts, but
 account XP is stored on the profile like everything else, so it also works with no
@@ -375,7 +394,7 @@ node tools\headless-test.mjs
 # 49 assertions: full host/join flow against a stand-in PeerJS
 node tools\multiplayer-e2e-test.mjs
 
-# 87 assertions: local profile, tampered-storage sanitising, merge policy,
+# 96 assertions: local profile, tampered-storage sanitising, merge policy,
                         account level maths, cap and overflow safety, monotonicity
 node tools\account-test.mjs
 

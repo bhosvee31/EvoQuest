@@ -646,58 +646,93 @@ const STRIKE_TIME   = 0.6;  // telegraph before a creature that is touching you
    level 2 being round(12 * 1.2) = 14 rather than round(10 * 1.2 * 1.2) = 14.
    The two agree here and drift apart further up.
 
-   Because of that rounding the chain cannot be closed-form'd with logs, so it is
-   built once into a table of cumulative thresholds and cached. The cap is level
-   99999, where the exact requirement is around 1e7917 -- comfortably past the
-   largest representable double -- so the thresholds are clamped instead of being
-   allowed to overflow. The cap is unreachable in practice; the clamp is what
-   stops the arithmetic turning into Infinity if a profile ever claims one. */
+   Because of that rounding the chain cannot be closed-form'd with logs, so the
+   low levels are built exactly, one rounding step at a time.
+
+   Above that the stored thresholds are log10 of the cumulative total rather than
+   the total itself. Level 99999 needs about 1e7917, which is far past the largest
+   representable double (~1.8e308), so a table of raw totals cannot span the whole
+   range -- an earlier version clamped at MAX_SAFE_INTEGER, which silently froze
+   every level from 181 onwards at the same cost and turned the top of the ladder
+   into a cliff: 9.00e15 XP gave level 180 and 9.01e15 gave level 99999. In log
+   space the chain keeps following 1.2x to the real cap, nothing overflows, and
+   the per-level gap is about 0.07 in log10, which is ten orders of magnitude
+   more precision than a double needs to tell levels apart. */
 const LEVEL_CAP        = 99999;
 const LEVEL_REQ_0      = 10;
 const LEVEL_GROWTH     = 1.2;
 const LEVEL_FOOD_BONUS = 0.0005;   // +0.05% food XP per level, none at level 0
 const ACCT_XP_PER_XP   = 1;        // account XP earned per in-game XP earned
 
-let _levelCum = null;
+/* Below this level the chain is built with exact integer arithmetic, so the
+   "round to a whole number" rule is honoured literally. Above it the rounding is
+   meaningless against numbers near 1e7917 anyway, and the closed form takes over. */
+const LEVEL_EXACT_UNTIL = 200;
+
+let _levelLog = null;
 function levelThresholds(){
-  if (_levelCum) return _levelCum;
+  if (_levelLog) return _levelLog;
   const t = new Float64Array(LEVEL_CAP + 1);
-  const CAP_XP = Number.MAX_SAFE_INTEGER;
+  const K = Math.min(LEVEL_EXACT_UNTIL, LEVEL_CAP);
+  const k = Math.log10(LEVEL_GROWTH);          // ~0.07918 per level
   let req = LEVEL_REQ_0, cum = 0;
-  t[0] = 0;
-  for (let L = 0; L < LEVEL_CAP; L++){
-    cum += req;                       // level L's own cost, before growing it
-    if (!isFinite(cum) || cum > CAP_XP) cum = CAP_XP;
-    t[L+1] = cum;
+  t[0] = -Infinity;                            // log10(0)
+  for (let L = 0; L < K; L++){
+    cum += req;                                // exact integer arithmetic down here
+    t[L + 1] = Math.log10(cum);
     req = Math.round(req * LEVEL_GROWTH);
-    if (!isFinite(req) || req > CAP_XP) req = CAP_XP;
   }
-  _levelCum = t;
+  // Above that the chain keeps growing by exactly 1.2 a level, so the cumulative
+  // total is a geometric series and can be extended in log space for every level
+  // up to the cap without ever overflowing. It has to be *seeded from the exact
+  // chain*, not written as a bare 10 * 1.2^L: because the rounding is chained, the
+  // early round-downs compound into a permanent 3.24% deficit (level 746 is
+  // 1.136e60 exactly, not the 1.173e60 the unrounded form gives). Seeding from
+  // cum/req at the handover reproduces the exact chain to float precision.
+  const logA = Math.log10(req / (LEVEL_GROWTH - 1));
+  for (let L = K + 1; L <= LEVEL_CAP; L++)
+    t[L] = logA + (L - K) * k;
+  _levelLog = t;
   return t;
 }
 
-/* The level a given account XP total has reached. Level L needs levelCum[L] XP
-   in total, so this is the largest L whose threshold is still <= xp. */
-function levelForAcctXp(xp){
+/* Cumulative account XP needed to reach a level, and what leaving it costs. Both
+   go through log space, so the round-trip loses a few ULP -- irrelevant at 10 XP,
+   and unavoidable at 1e7917. */
+function levelThreshold(level){
+  return Math.pow(10, levelThresholds()[clamp(level | 0, 0, LEVEL_CAP)]);
+}
+function levelRequirement(level){
   const t = levelThresholds();
+  const L = clamp(level | 0, 0, LEVEL_CAP);
+  if (L >= LEVEL_CAP) return Infinity;
+  const next = Math.pow(10, t[L + 1]);
+  if (!isFinite(next)) return Infinity;         // beyond what a double can hold
+  return next - Math.pow(10, t[L]);
+}
+
+/* The level a given account XP total has reached: the largest L whose cumulative
+   threshold is still <= xp. Compared in log space so the whole cap range works. */
+function levelForAcctXp(xp){
+  if (!(xp > 0)) return 0;
+  const t = levelThresholds();
+  const lx = Math.log10(xp);
   let lo = 0, hi = LEVEL_CAP;
   while (lo < hi){
     const mid = (lo + hi + 1) >> 1;
-    if (t[mid] <= xp) lo = mid; else hi = mid - 1;
+    if (t[mid] <= lx) lo = mid; else hi = mid - 1;
   }
   return lo;
 }
 
 /* Where you sit inside the current level. `into` is XP banked toward the next
-   one, `need` is how much the next level costs. At the cap both go to 0. */
+   one, `need` is what leaving it costs. Once the next level costs more than a
+   double can express, it is reported as maxed rather than as NaN. */
 function levelProgress(xp){
-  const t = levelThresholds();
   const level = levelForAcctXp(xp);
-  if (level >= LEVEL_CAP) return { level: level, into: 0, need: 0, maxed: true };
-  return { level: level,
-           into: xp - t[level],
-           need: t[level + 1] - t[level],
-           maxed: false };
+  const need = levelRequirement(level);
+  if (!isFinite(need)) return { level: level, into: 0, need: 0, maxed: true };
+  return { level: level, into: xp - levelThreshold(level), need: need, maxed: false };
 }
 
 /* The bonus the level currently buys: 0.05% more food XP each level, so level 1
@@ -2670,6 +2705,8 @@ window.EvoQuest = {
   LEVEL_FOOD_BONUS: LEVEL_FOOD_BONUS, ACCT_XP_PER_XP: ACCT_XP_PER_XP,
   levelThresholds: levelThresholds, levelForAcctXp: levelForAcctXp,
   levelProgress: levelProgress, levelFoodBoost: levelFoodBoost,
+  levelThreshold: levelThreshold, levelRequirement: levelRequirement,
+  LEVEL_EXACT_UNTIL: LEVEL_EXACT_UNTIL,
   awardAcctXp: awardAcctXp, foodXpFor: foodXpFor,
   get acctXp(){ return acctXp; },
   BOOST_MULT: BOOST_MULT, NPC_SPAWN_SAFE: NPC_SPAWN_SAFE,
