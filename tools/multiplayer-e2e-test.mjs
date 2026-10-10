@@ -282,5 +282,159 @@ console.log("\nroom code sanitising");
   ok("digits are kept", cr("room 42") === "ROOM42", cr("room 42"));
 }
 
+/* ============================================== clicking to enter the game === */
+// The point of the feature: pressing ENTER puts the player into the shared
+// arena rather than into a private world. These drive enterGame() itself, not
+// Net.host()/Net.join() directly, because the wiring is what was broken.
+console.log("\nclicking ENTER connects you to the arena");
+let enterA, enterB;
+{
+  enterA = makeGame();
+  await enterA.enterGame();
+  await new Promise(r => setTimeout(r, 40));
+  ok("the first player in becomes the host", enterA.Net.mode === "host", enterA.Net.mode);
+  ok("they land in the default room", enterA.Net.room === "EVOQUEST", enterA.Net.room);
+  ok("the game actually starts", enterA.running === true);
+  ok("the start overlay is dismissed", enterA.el.start.style.display === "none",
+     enterA.el.start.style.display);
+  ok("they have a world seed of their own", Number.isFinite(enterA.Net.seed) && enterA.Net.seed > 0);
+}
+
+console.log("\nclicking ENTER as the second player joins that arena");
+{
+  enterB = makeGame();
+  await enterB.enterGame();
+  await new Promise(r => setTimeout(r, 60));
+  ok("the second player is a client, not a lone world", enterB.Net.mode === "client", enterB.Net.mode);
+  ok("they joined the same room", enterB.Net.room === "EVOQUEST", enterB.Net.room);
+  ok("their game starts too", enterB.running === true);
+  ok("the host now has one remote player", enterA.Net.peers.size === 1, enterA.Net.peers.size);
+  ok("both players share one world seed", enterB.Net.seed === enterA.Net.seed);
+  ok("the client was told which player it is", enterB.Net.id === 1, enterB.Net.id);
+  ok("the client's food field matches the host's",
+     enterB.foods.length === enterA.foods.length, `${enterB.foods.length} vs ${enterA.foods.length}`);
+}
+
+console.log("\nthe lobby reflects a live session");
+{
+  ok("the host panel shows the room code", /EVOQUEST/.test(enterA.ui.netPeers._html || ""),
+     enterA.ui.netPeers._html);
+  ok("the client panel says it is in a room", /EVOQUEST/.test(enterB.ui.netPeers._html || ""),
+     enterB.ui.netPeers._html);
+  ok("Host is disabled while hosting", enterA.ui.btnHost.disabled === true);
+  ok("Join is disabled while hosting", enterA.ui.btnJoin.disabled === true);
+  ok("Leave is offered while connected", enterA.ui.btnLeave.style.display === "block");
+  // The player count is on a timer, not on a click, so let the HUD tick.
+  for (let i = 0; i < 200; i++) enterA.step(1 / 60);
+  ok("the host panel counts both players",
+     /Players: <b>2<\/b>/.test(enterA.ui.netPeers._html || ""), enterA.ui.netPeers._html);
+}
+
+// Release the shared default room, or every later block silently joins this
+// arena instead of hosting one of its own.
+await enterA.Net.leave();
+await enterB.Net.leave();
+
+console.log("\nplay solo still works");
+{
+  const solo = makeGame();
+  await solo.enterGame(true);
+  ok("solo starts the game", solo.running === true);
+  ok("solo touches no network", solo.Net.mode === "offline", solo.Net.mode);
+  ok("solo has no room", solo.Net.room === "", JSON.stringify(solo.Net.room));
+  ok("no peer library was even loaded for solo play", solo.Net.peerRef == null);
+}
+
+/* A failed connect used to leave Net.mode stuck on "host", which disabled
+   Host, Join and the room box for the rest of the session -- one failure and
+   multiplayer was permanently unreachable in that tab. */
+console.log("\na failed connect leaves the lobby usable");
+{
+  const broken = makeGame();
+  const realJoin = broken.Net.join;
+  broken.Net.join = () => Promise.reject(new Error("signalling server unreachable"));
+  const realHost = broken.Net.host;
+  broken.Net.host = () => Promise.reject(new Error("room code in use, or server unreachable"));
+  let entered = false;
+  try { await broken.enterGame(); entered = true; } catch (e) { /* swallowed on purpose */ }
+  broken.Net.join = realJoin; broken.Net.host = realHost;
+  ok("enterGame resolves instead of hanging on failure", entered === true);
+  ok("the game still starts, alone", broken.running === true);
+  ok("mode is back to offline", broken.Net.mode === "offline", broken.Net.mode);
+  ok("Host is usable again", broken.ui.btnHost.disabled === false);
+  ok("Join is usable again", broken.ui.btnJoin.disabled === false);
+  ok("the room box is usable again", broken.ui.roomIn.disabled === false);
+  ok("no peer was left behind", broken.Net.peerRef == null && broken.Net.conn == null);
+  ok("the failure is explained on screen", /Could not reach the arena/i.test(broken.el.startNet._html || ""),
+     broken.el.startNet._html);
+}
+
+console.log("\nthe host leaving drops everyone back to single player");
+{
+  const lost = makeGame();
+  await lost.enterGame();
+  const friend = makeGame();
+  await friend.enterGame();
+  await new Promise(r => setTimeout(r, 60));
+  ok("both are in the arena", lost.Net.mode === "host" && friend.Net.mode === "client");
+  const crittersSeen = friend.critters.length;
+  await lost.Net.leave();
+  await new Promise(r => setTimeout(r, 30));
+  ok("the client is put back into single player", friend.Net.mode === "offline", friend.Net.mode);
+  ok("the client is told why", /host left/i.test(friend.Net.lastStatus || "") ||
+     friend.ui.btnLeave.style.display === "none");
+  ok("Leave is hidden again", friend.ui.btnLeave.style.display === "none");
+  ok("Host is available again on the client", friend.ui.btnHost.disabled === false);
+  ok("the frozen remote creatures are gone",
+     friend.critters.every(c => c.isNet !== true), friend.critters.filter(c => c.isNet).length);
+  ok("but there is still a playable world", friend.critters.length > 0,
+     `${crittersSeen} -> ${friend.critters.length}`);
+  const x0 = friend.critters[0] && friend.critters[0].x;
+  for (let i = 0; i < 60; i++) friend.step(1 / 60);
+  ok("and the AI moves again instead of standing frozen",
+     friend.critters.some(c => Math.abs(c.x - x0) > 0.5));
+}
+
+console.log("\none player leaving does not disconnect the others");
+{
+  const host = makeGame();
+  await host.enterGame();
+  const p1 = makeGame(); await p1.enterGame();
+  const p2 = makeGame(); await p2.enterGame();
+  await new Promise(r => setTimeout(r, 80));
+  ok("three players are in", host.Net.peers.size === 2, host.Net.peers.size);
+  await p1.Net.leave();
+  await new Promise(r => setTimeout(r, 30));
+  ok("the host drops only the player who left", host.Net.peers.size === 1, host.Net.peers.size);
+  ok("the host is still hosting", host.Net.mode === "host", host.Net.mode);
+  ok("the remaining player stays connected", p2.Net.mode === "client", p2.Net.mode);
+  await host.Net.leave();
+}
+
+console.log("\njoin resolves on the world, not just the socket");
+{
+  // If join() returns on datachannel-open, the caller starts a game before the
+  // host's seed and player id have arrived, which is an empty arena.
+  const late = makeGame();
+  const room = "LATE" + Math.floor(performance.now() % 1000);
+  await late.Net.host(room);
+  const guest = makeGame();
+  const seen = { id: -1, seed: -1 };
+  const realJoin = guest.Net.join;
+  guest.Net.join = async function (r, t) {
+    const out = await realJoin.call(this, r, t);
+    // Sampled the instant join() hands control back: the world must be here.
+    seen.id = this.id; seen.seed = this.seed;
+    return out;
+  };
+  await guest.Net.join(room);
+  ok("join() does not resolve until the world has arrived",
+     guest.Net.id > 0 && guest.Net.seed > 0, `id=${guest.Net.id} seed=${guest.Net.seed}`);
+  ok("and the id was already set when join() returned", seen.id > 0, seen.id);
+  ok("and so was the seed", seen.seed === late.Net.seed, `${seen.seed} vs ${late.Net.seed}`);
+  await late.Net.leave();
+  await guest.Net.leave();
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

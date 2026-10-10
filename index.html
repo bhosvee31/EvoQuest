@@ -134,6 +134,18 @@
     background:linear-gradient(90deg,#5ad1ff,#7ef0b4);box-shadow:0 8px 26px rgba(90,209,255,.32);}
   #go:hover{filter:brightness(1.1);}
   .tiny{font-size:10px;color:var(--dim);margin-top:16px;}
+  .netline{font-size:11px;color:#b9d3e6;margin:18px 0 8px;line-height:1.5;}
+  .netline b{color:#7ef0b4;letter-spacing:1px;}
+  .netrow{display:flex;gap:8px;margin-bottom:16px;}
+  .netrow input{pointer-events:auto;flex:1;min-width:0;font:inherit;font-size:11.5px;
+    text-transform:uppercase;padding:8px 9px;border-radius:7px;color:var(--ink);
+    background:rgba(0,0,0,.4);border:1px solid var(--line);}
+  .netrow input:focus{outline:none;border-color:rgba(90,209,255,.6);}
+  #startSolo{pointer-events:auto;cursor:pointer;font:inherit;font-size:11px;font-weight:600;
+    padding:8px 11px;border-radius:7px;border:1px solid var(--line);color:var(--dim);
+    background:transparent;white-space:nowrap;}
+  #startSolo:hover{color:var(--ink);background:rgba(90,209,255,.14);}
+  #startSolo.on{color:#ffd75e;border-color:rgba(255,215,94,.5);background:rgba(255,215,94,.12);}
 
   /* ---------- lobby ---------- */
   #lobby{position:fixed;right:12px;top:12px;z-index:6;width:206px;padding:10px 11px;}
@@ -288,8 +300,13 @@
       <li><b>Survive</b> &mdash; if you are eaten you keep <b>50%</b> of all your XP, lifetime total included.</li>
       <li><b>Account levels</b> &mdash; in-game XP also fills a separate account total that <b>never</b> goes down, even if you are eaten. Leaving level 0 costs 10, and each level after costs <b>1.1x</b> the one before. Every level adds <b>+0.05%</b> food XP, permanently.</li>
     </ol>
+    <div id="startNet" class="netline">Joining the shared arena &mdash; <b>EVOQUEST</b></div>
+    <div class="netrow">
+      <input id="startRoom" maxlength="18" placeholder="ARENA CODE" spellcheck="false" autocomplete="off">
+      <button id="startSolo" title="Skip multiplayer and play alone">play solo</button>
+    </div>
     <button id="go">ENTER THE FOOD CHAIN</button>
-    <div class="tiny">Runs entirely offline &middot; single HTML file &middot; best with a mouse</div>
+    <div class="tiny">Single player works with no network at all &middot; one HTML file &middot; best with a mouse</div>
   </div>
 </div>
 
@@ -1248,7 +1265,15 @@ const NET_CFG = {
   tickHz: 15,          // snapshots per second
   inputHz: 20,         // client -> host input rate
   peerLib: "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js",
-  openPeer: { debug: 0 }
+  openPeer: { debug: 0 },
+  /* Clicking to enter lands you in this room. Nobody is a server, so the first
+     player in hosts it and everyone after connects to that host. */
+  defaultRoom: "EVOQUEST",
+  /* How long a join attempt is given before we assume the room is empty and
+     offer to host it ourselves. Kept short: the enter button should not hang
+     for twelve seconds when nobody is there. */
+  probeMs: 5000,
+  connectMs: 12000
 };
 
 /* Deterministic PRNG so every peer generates an identical world. */
@@ -1283,14 +1308,38 @@ const Net = {
   hostId: 0,
   nextId: 0,           // peer ids start at 1; 0 is reserved for the host
   libPromise: null,
+  roomCode: "",        // the room we are actually in, once connected
+  busy: false,         // a connect attempt is in flight
+  statusText: "",
+  lastStatus: "",      // why we ended up offline, if we were ever online
   foodGone: [],       // food ids eaten this frame
   foodAdded: [],     // food that respawned this frame
   fed: [],           // remote players who ate, so their client can be credited
 
   isNet(){ return this.mode !== "offline"; },
   isHost(){ return this.mode === "host" || this.mode === "offline"; },
+  get room(){ return this.roomCode || ""; },
+  get peerCount(){ return this.mode === "host" ? this.peers.size + 1 : 0; },
 
   setStatus(msg){ const n = document.getElementById("netStatus"); if (n) n.textContent = msg || ""; },
+
+  /* Put everything back to a clean single-player state. Called on every exit
+     path -- a successful leave and a failed connect both -- so a connection
+     that never completed cannot leave `mode` stuck on "host" and lock the
+     lobby buttons out for the rest of the session. */
+  reset(reason){
+    try { this.conn && this.conn.close(); } catch(e){}
+    try { this.peerRef && this.peerRef.destroy(); } catch(e){}
+    this.conn = null; this.peerRef = null; this.peerId = null;
+    this.peers.clear(); this.snapshots.clear();
+    this.conns = new Map();
+    this.mode = "offline";
+    this.id = 0; this.seed = 0; this.hostId = 0;
+    this.nextId = 0; this.ready = false;
+    this.roomCode = "";
+    this.foodGone.length = 0; this.foodAdded.length = 0; this.fed.length = 0;
+    this.setStatus(reason || "");
+  },
 
   /* --- transport factory ------------------------------------- */
   /* PeerJS gives us room codes and direct DataChannels between peers. */
@@ -1323,22 +1372,50 @@ const Net = {
   async host(room){
     this.setStatus("connecting...");
     const P = await this.loadLib();
-    const id = cleanRoom(room) || "evoquest";
+    const id = cleanRoom(room) || NET_CFG.defaultRoom;
     const peer = new P(id, NET_CFG.openPeer);
     this.seed = (Math.random() * 0xffffffff) >>> 0;
     this.id = 0;
-    this.mode = "host";
+
+    let opened;
+    try {
+      opened = await new Promise((res, rej) => {
+        // A rejected peer keeps emitting errors, so stop listening once we are
+        // done and let later failures be reported by the handler below.
+        const fail = (e) => rej(new Error(netErrText(e, "room code in use, or server unreachable")));
+        peer.on("error", fail);
+        const to = setTimeout(() => fail(new Error("room code in use, or server unreachable")),
+                              NET_CFG.connectMs);
+        peer.on("open", id2 => { clearTimeout(to); res(id2); });
+      });
+    } catch (e) {
+      try { peer.destroy(); } catch(x){}
+      this.reset();
+      throw e;
+    }
+
+    // From here on the room is live, so failures are a disconnect rather than
+    // a reason to abandon the attempt.
     this.peerRef = peer;
-
-    await new Promise((res, rej) => {
-      peer.on("open", id2 => { this.peerId = id2; res(); });
-      peer.on("error", e => rej(e));
-      setTimeout(() => rej(new Error("room code in use, or server unreachable")), 12000);
-    });
-
+    this.roomCode = id;
+    this.peerId = opened;
+    this.mode = "host";
+    peer.on("error", e => this.onPeerError(e));
     peer.on("connection", dc => this.acceptPeer(dc));
-    this.setStatus("hosting room " + cleanRoom(room).toUpperCase());
-    return cleanRoom(room).toUpperCase();
+    this.conns = new Map();
+    this.setStatus("hosting room " + id);
+    return id;
+  },
+
+  /* The signalling server going away mid-session drops the host out of the
+     room. Everyone connected to us is about to lose their world, so say so
+     rather than silently standing still. */
+  onPeerError(e){
+    if (this.mode === "host"){
+      this.setStatus("hosting stopped: " + netErrText(e, "connection lost"));
+      this.broadcast({ t: "bye", id: 0 });
+      pushFeed("Host connection lost", "death");
+    }
   },
 
   acceptPeer(dc){
@@ -1379,29 +1456,97 @@ const Net = {
     t.close();
   },
 
-  async join(room){
+  /* Join only counts as done once the host has handed us its world. The
+     `welcome` message is what carries our player id and the world seed, so
+     resolving on the datachannel merely being open would hand control back to
+     the caller before there is a game to play -- which is why entering used to
+     drop you into an empty arena. */
+  async join(room, timeoutMs){
     this.setStatus("connecting...");
     const P = await this.loadLib();
     const id = cleanRoom(room);
     if (!id) throw new Error("room code required");
     const peer = new P({ debug: 0, reliable: true });
-    this.mode = "client";
-    this.peerRef = peer;
-    this.conn = await new Promise((res, rej) => {
-      const to = setTimeout(() => rej(new Error("no host found for room " + id.toUpperCase())), 12000);
-      peer.on("open", () => {
-        const dc = peer.connect(id, { reliable: true });
-        dc.on("open", () => { clearTimeout(to); res(this.wrap(dc)); });
-        dc.on("error", e => { clearTimeout(to); rej(e); });
+    this.roomCode = id;
+
+    try {
+      const t = await new Promise((res, rej) => {
+        const fail = (e) => rej(new Error(netErrText(e, "no host found for room " + id)));
+        peer.on("error", fail);
+        const to = setTimeout(() => fail(new Error("no host found for room " + id)),
+                              timeoutMs || NET_CFG.connectMs);
+        peer.on("open", () => {
+          const dc = peer.connect(id, { reliable: true });
+          dc.on("open", () => { clearTimeout(to); res(this.wrap(dc)); });
+          dc.on("error", fail);
+        });
       });
-      peer.on("error", e => { clearTimeout(to); rej(e); });
-    });
-    const t = this.conn;
-    t.onMessage(msg => this.onMessage(msg, null));
-    t.onClose(() => { this.setStatus("disconnected"); this.mode = "offline"; });
-    t.onError(() => {});
-    this.setStatus("connected to " + id.toUpperCase());
-    return id.toUpperCase();
+
+      this.peerRef = peer;
+      this.conn = t;
+      this.mode = "client";
+      peer.on("error", e => this.setStatus("connection problem: " + netErrText(e, "lost")));
+
+      // Handlers go on before we wait, or the host's `welcome` -- sent the
+      // instant the channel opens -- arrives with nothing listening and is lost.
+      const gotWorld = new Promise((res, rej) => {
+        const to = setTimeout(() => rej(new Error("host accepted the connection but sent no world")),
+                              NET_CFG.connectMs);
+        t.onMessage(msg => {
+          if (msg && msg.t === "welcome"){ clearTimeout(to); res(); }
+          this.onMessage(msg, null);
+        });
+      });
+      let closed = false;
+      t.onClose(() => { closed = true; this.onDropped(); });
+      t.onError(e => this.setStatus("connection problem: " + netErrText(e, "lost")));
+
+      await gotWorld.catch(e => {
+        throw closed ? new Error("disconnected before the world arrived") : e;
+      });
+
+      this.setStatus("connected to " + id);
+      return id;
+    } catch (e) {
+      try { peer.destroy(); } catch(x){}
+      this.reset();
+      throw e;
+    }
+  },
+
+  /* What the enter button calls. Join the shared room if somebody is already
+     hosting it; host it ourselves if nobody is. Either way the player lands in
+     the same arena rather than in a private world. */
+  async joinOrHost(room){
+    const id = cleanRoom(room) || NET_CFG.defaultRoom;
+    try {
+      await this.join(id, NET_CFG.probeMs);
+      return { code: id, role: "client" };
+    } catch (e) {
+      // Nobody answered in time, so the room is ours to open. If it is not --
+      // someone else got there in the gap -- fall back to joining them.
+      try {
+        await this.host(id);
+        return { code: id, role: "host" };
+      } catch (e2) {
+        this.reset();
+        await this.join(id);
+        return { code: id, role: "client" };
+      }
+    }
+  },
+
+  /* The host vanished, or the channel dropped. Stop pretending we still have
+     a world: go back to single player so the player can carry on alone. */
+  onDropped(){
+    if (this.mode !== "client") return;
+    const was = this.roomCode;
+    this.lastStatus = "host left " + (was || "") + " -- back to single player";
+    this.reset(this.lastStatus);
+    toast("The host left the arena");
+    pushFeed("Host left the arena", "death");
+    dropRemotePlayers();
+    if (typeof setLobbyState === "function") setLobbyState();
   },
 
   broadcast(obj){ (this.conns || new Map()).forEach((_, t) => t.send(obj)); },
@@ -1412,12 +1557,10 @@ const Net = {
   },
 
   leave(){
-    try { this.conn && this.conn.close(); } catch(e){}
-    try { this.peerRef && this.peerRef.destroy(); } catch(e){}
-    this.conn = null; this.peerRef = null;
-    this.peers.clear(); this.snapshots.clear();
-    this.conns = new Map();
-    this.mode = "offline";
+    if (this.mode === "host") this.broadcast({ t: "bye", id: 0 });
+    const wasNet = this.mode !== "offline";
+    this.reset();
+    if (wasNet) dropRemotePlayers();
     this.setStatus("");
     toast("Back to single player");
   },
@@ -1456,6 +1599,27 @@ const Net = {
 
 function cleanRoom(s){
   return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 18);
+}
+
+/* PeerJS errors are `{ type: "..." }` objects with a message meant for logs.
+   Show the player something they can act on instead of "unavailable-id". */
+function netErrText(e, fallback){
+  const type = e && (e.type || e.code || e.name);
+  if (type === "unavailable-id") return "that room name is already taken, try another";
+  if (type === "peer-unavailable") return "no host is answering for that room";
+  if (type === "network" || type === "server-error" || type === "socket-error")
+    return "could not reach the signalling server";
+  if (type === "browser-incompatible") return "this browser cannot do peer connections";
+  const msg = e && e.message;
+  return typeof msg === "string" && msg && !/^[a-z-]+-error$/i.test(msg) ? msg : (fallback || "connection failed");
+}
+
+/* Snapshots put remote players into the same critters array the local AI uses.
+   When a session ends those entries must go, or the client is left staring at a
+   frozen cast of creatures that nothing will ever move again. */
+function dropRemotePlayers(){
+  critters = critters.filter(c => !c.isNet);
+  if (!critters.length) initWorld();
 }
 
 /* Message handlers. Split out so the test harness can drive them directly. */
@@ -1515,7 +1679,15 @@ const NetHooks = {
       player.foodEaten += f.n;
     }
   },
-  bye(){ Net.setStatus("host left"); }
+  /* The host sends `bye` with id 0 when it is going away, and with the peer's
+     id when only that peer has gone. Only the first means our world is gone --
+     treating the second the same way made every remaining player drop the
+     moment any single peer disconnected. */
+  bye(msg){
+    if (msg && msg.id === 0){ Net.onDropped(); return; }
+    if (Net.mode === "client" && msg && Net.snapshots.has(10000 + msg.id))
+      Net.snapshots.delete(10000 + msg.id);
+  }
 };
 
 /* Clients rebuild the AI from the host's flat snapshot. */
@@ -1754,7 +1926,8 @@ window.addEventListener("keydown", e => {
   else if (e.code === "KeyC"){ toggleCodex(); }
   else if (e.code === "KeyM"){ Sfx.on = !Sfx.on; toast(Sfx.on ? "Sound on" : "Sound off"); }
   else if (e.code === "KeyR"){ if (running) restart(); }
-  if (e.code === "Space" && !running) startGame();
+  if (e.code === "Space" && !running) enterGame();
+  else if (e.code === "Enter" && !running) enterGame();
 });
 window.addEventListener("keyup", e => { if (e.code === "Space") input.space = false; });
 
@@ -1798,41 +1971,59 @@ const ui = {
 
 function setLobbyState(){
   const net = Net.mode;
+  const busy = Net.busy;
   ui.btnLeave.style.display = net === "offline" ? "none" : "block";
-  ui.btnHost.disabled = net !== "offline";
-  ui.btnJoin.disabled = net !== "offline";
-  ui.roomIn.disabled = net !== "offline";
+  ui.btnHost.disabled = net !== "offline" || busy;
+  ui.btnJoin.disabled = net !== "offline" || busy;
+  ui.roomIn.disabled = net !== "offline" || busy;
   if (net === "offline"){
-    ui.netPeers.textContent = "Play alone, or host a room.";
+    ui.netPeers.textContent = busy ? Net.statusText || "connecting..."
+                                   : "Play alone, or host a room.";
   } else if (net === "host"){
-    ui.netPeers.innerHTML = "You are hosting. Share the room code.<br>" +
-      "Players: <b>" + (Net.peers.size + 1) + "</b>";
+    ui.netPeers.innerHTML = "Hosting <b>" + esc(Net.room) + "</b>. Share the code.<br>" +
+      "Players: <b>" + Net.peerCount + "</b>";
   } else {
-    ui.netPeers.textContent = "Connected. The host runs the world.";
+    ui.netPeers.innerHTML = "In <b>" + esc(Net.room) + "</b> with the host's world.";
+  }
+  if (el.startNet) el.startNet.textContent = ui.netPeers.textContent || "";
+}
+
+/* Host and join from the lobby box. Both now share one guarded path, so a
+   failure lands back in single player with the buttons usable again instead of
+   leaving `Net.mode` stuck on "host". */
+async function doNet(which){
+  if (Net.busy || Net.mode !== "offline") return;
+  const typed = cleanRoom(ui.roomIn.value);
+  if (which === "join" && !typed){ Net.setStatus("type a room code first"); return; }
+  const code = typed || NET_CFG.defaultRoom;
+  Net.busy = true;
+  Net.statusText = "connecting to " + code + "...";
+  setLobbyState();
+  try {
+    const r = which === "host" ? { code: await Net.host(code), role: "host" }
+                                : await Net.joinOrHost(code);
+    ui.roomIn.value = r.code;
+    startGame();
+    showBanner(r.role === "host" ? "HOSTING " + r.code : "JOINING " + r.code,
+               r.role === "host" ? "Share the code so friends can join"
+                                  : "Waiting for the host's world", 2.5);
+  } catch (e) {
+    Net.reset(e.message);
+    Net.statusText = "";
+    toast("Multiplayer failed: " + e.message);
+  } finally {
+    Net.busy = false;
+    setLobbyState();
   }
 }
 
-ui.btnHost.addEventListener("click", async () => {
-  const code = cleanRoom(ui.roomIn.value) || "evoquest";
-  try {
-    await Net.host(code);
-    ui.roomIn.value = code.toUpperCase();
-    showBanner("HOSTING " + code.toUpperCase(), "Share the code so friends can join", 2.5);
-    startGame();
-  } catch (e){ Net.setStatus(e.message); toast("Host failed"); }
-  setLobbyState();
-});
-ui.btnJoin.addEventListener("click", async () => {
-  const code = cleanRoom(ui.roomIn.value);
-  if (!code){ Net.setStatus("type a room code first"); return; }
-  try {
-    await Net.join(code);
-    showBanner("JOINING " + code.toUpperCase(), "Waiting for the host's world", 2.5);
-    startGame();
-  } catch (e){ Net.setStatus(e.message); Net.mode = "offline"; toast("Join failed"); }
-  setLobbyState();
-});
+ui.btnHost.addEventListener("click", () => doNet("host"));
+ui.btnJoin.addEventListener("click", () => doNet("join"));
 ui.btnLeave.addEventListener("click", () => { Net.leave(); setLobbyState(); });
+
+/* Player count and connection state change without any click, so refresh the
+   box on a timer rather than only when a button is pressed. */
+let lobbyTick = 0;
 
 /* ---------------------------------------------------------- account wiring */
 const au = {
@@ -1970,7 +2161,12 @@ const el = {
   veil:     document.getElementById("deathVeil"),
   portrait: document.getElementById("portrait"),
   codex:    document.getElementById("codex"),
-  codexGrid:document.getElementById("codexGrid")
+  codexGrid:document.getElementById("codexGrid"),
+  start:    document.getElementById("start"),
+  go:       document.getElementById("go"),
+  startNet: document.getElementById("startNet"),
+  startRoom:document.getElementById("startRoom"),
+  startSolo:document.getElementById("startSolo")
 };
 
 RANKS.forEach((r,i) => {
@@ -2014,6 +2210,16 @@ let toastT = 0;
 function toast(msg){ showBanner(msg, "", 1.1); }
 
 function updateHUD(){
+  // The lobby box reflects connection state and player count, neither of which
+  // involve a click, so it is refreshed on the same HUD tick.
+  if (running && Net.mode === "host" && ++lobbyTick >= 8){
+    lobbyTick = 0;
+    setLobbyState();
+  }
+  updateHUDBody();
+}
+
+function updateHUDBody(){
   const r = RANKS[player.rank], max = RANKS.length-1;
   const isMax = player.rank === max;
   const shown = isMax ? RANKS[max].need : player.xp;
@@ -2711,6 +2917,62 @@ function startGame(){
              "Eat green food. Hold click or Space to boost.", 2.6);
 }
 
+/* What clicking ENTER does. Multiplayer is the default path: the player is put
+   into the shared arena, joining the host if there is one and hosting it if
+   there is not. A network that cannot be reached must not trap them on the
+   start screen, so every failure still starts the game -- alone. */
+let entering = false;
+async function enterGame(forceSolo){
+  if (running || entering) return;
+  entering = true;
+  const solo = forceSolo === true;
+  const code = cleanRoom(el.startRoom.value) || NET_CFG.defaultRoom;
+  el.go.textContent = solo ? "ENTERING..." : "FINDING THE ARENA...";
+  el.go.disabled = true;
+
+  if (!solo){
+    Net.busy = true;
+    Net.statusText = "connecting to " + code + "...";
+    setLobbyState();
+    try {
+      const r = await Net.joinOrHost(code);
+      Net.statusText = "";
+      ui.roomIn.value = r.code;
+      el.startRoom.value = r.code;
+      startGame();
+      showBanner(r.role === "host" ? "HOSTING " + r.code : "IN " + r.code,
+                 r.role === "host" ? "You run the world. Share the code so friends can join."
+                                    : "The host runs the world.",
+                 2.8);
+      setLobbyState();
+      entering = false;
+      return;
+    } catch (e) {
+      Net.reset();
+      Net.statusText = "";
+      el.startNet.innerHTML = "Could not reach the arena (" + esc(e.message) +
+                              "). Playing alone.";
+      toast("Multiplayer unavailable");
+    } finally {
+      Net.busy = false;
+    }
+  } else {
+    el.startNet.textContent = "Playing alone.";
+  }
+
+  startGame();
+  entering = false;
+}
+
+/* The room code on the start screen and the one in the lobby are the same
+   room, so keep them in step rather than leaving two sources of truth. */
+if (el.startRoom){
+  el.startRoom.value = NET_CFG.defaultRoom;
+  el.startRoom.addEventListener("input", () => { ui.roomIn.value = el.startRoom.value; });
+}
+if (el.startSolo) el.startSolo.addEventListener("click", () => { el.startSolo.classList.add("on"); enterGame(true); });
+ui.roomIn.addEventListener("input", () => { if (el.startRoom) el.startRoom.value = ui.roomIn.value; });
+
 /** Wipe the world and start the player over at Plankton. */
 function restart(){
   initWorld();
@@ -2725,8 +2987,8 @@ function restart(){
   showBanner("NEW LIFE", "You are Plankton again. Good luck.", 2.0);
 }
 
-document.getElementById("go").addEventListener("click", startGame);
-cv.addEventListener("pointerdown", () => { if (!running) startGame(); });
+el.go.addEventListener("click", () => enterGame());
+cv.addEventListener("pointerdown", () => { if (!running) enterGame(); });
 
 /* Small handle so the game can be inspected/tested from the console or a
    headless harness. Read-only apart from the explicit helper functions. */
@@ -2748,7 +3010,10 @@ window.EvoQuest = {
   STRIKE_TIME: STRIKE_TIME, WORLD: WORLD, world: WORLD,
   Net: Net, NetHooks: NetHooks, rebuildWorldFromSeed: rebuildWorldFromSeed,
   applySnapshot: applySnapshot, cleanRoom: cleanRoom, ui: ui,
-  setLobbyState: setLobbyState,
+  setLobbyState: setLobbyState, doNet: doNet,
+  NET_CFG: NET_CFG, el: el,
+  get entering(){ return entering; },
+  enterGame: enterGame, dropRemotePlayers: dropRemotePlayers,
   Accounts: Accounts, checkpoint: checkpoint, applyProfileToGame: applyProfileToGame,
   renderAccountUI: renderAccountUI, FB_CONFIG: FB_CONFIG,
   get player(){ return player; },
