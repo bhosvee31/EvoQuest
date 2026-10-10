@@ -119,7 +119,10 @@
   /* ---------- start ---------- */
   #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
     background:radial-gradient(circle at 50% 40%,#0d2438,#050a12 70%);z-index:5;text-align:center;padding:20px;}
-  #startBox{max-width:560px;width:100%;padding:30px 34px;}
+  /* The start panel is ~750px of content and a laptop viewport is often shorter
+     than that. Without this the ENTER button and the arena box are simply cut
+     off at the bottom, with no way to reach them. Same guard as #codexBox. */
+  #startBox{max-width:560px;width:100%;padding:30px 34px;max-height:calc(100vh - 40px);overflow:auto;}
   #startBox h1{margin:0 0 2px;font-size:38px;letter-spacing:2px;
     background:linear-gradient(90deg,#5ad1ff,#7ef0b4,#ffd75e);-webkit-background-clip:text;
     background-clip:text;color:transparent;}
@@ -146,6 +149,17 @@
     background:transparent;white-space:nowrap;}
   #startSolo:hover{color:var(--ink);background:rgba(90,209,255,.14);}
   #startSolo.on{color:#ffd75e;border-color:rgba(255,215,94,.5);background:rgba(255,215,94,.12);}
+  .acctbox{margin:0 0 18px;padding:10px 12px 9px;border-radius:9px;text-align:left;
+    background:rgba(0,0,0,.28);border:1px solid var(--line);}
+  .acctrow{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
+  .acctrow b{font-size:12px;letter-spacing:1.4px;color:#7ef0b4;}
+  .acctrow span{font-size:10.5px;color:#ffd75e;}
+  .acctbar{height:7px;margin:7px 0 6px;border-radius:4px;background:rgba(0,0,0,.5);
+    overflow:hidden;border:1px solid var(--line);}
+  .acctbar > i{display:block;height:100%;width:0%;border-radius:3px;
+    background:linear-gradient(90deg,#7ef0b4,#ffd75e);transition:width .25s ease;}
+  #startAcctText{font-size:9.5px;color:var(--dim);line-height:1.55;}
+  #startAcctText b{color:#bfe3ff;}
 
   /* ---------- lobby ---------- */
   #lobby{position:fixed;right:12px;top:12px;z-index:6;width:206px;padding:10px 11px;}
@@ -300,6 +314,11 @@
       <li><b>Survive</b> &mdash; if you are eaten you keep <b>50%</b> of all your XP, lifetime total included.</li>
       <li><b>Account levels</b> &mdash; in-game XP also fills a separate account total that <b>never</b> goes down, even if you are eaten. Leaving level 0 costs 10, and each level after costs <b>1.1x</b> the one before. Every level adds <b>+0.05%</b> food XP, permanently.</li>
     </ol>
+    <div id="startAcct" class="acctbox">
+      <div class="acctrow"><b id="startAcctLv">ACCOUNT LEVEL 0</b><span id="startAcctBonus">+0.00% food XP</span></div>
+      <div class="acctbar"><i id="startAcctFill"></i></div>
+      <div id="startAcctText">0.0 / 10.0 XP toward level 1</div>
+    </div>
     <div id="startNet" class="netline">Joining the shared arena &mdash; <b>EVOQUEST</b></div>
     <div class="netrow">
       <input id="startRoom" maxlength="18" placeholder="ARENA CODE" spellcheck="false" autocomplete="off">
@@ -805,6 +824,10 @@ function awardAcctXp(amount){
              (after * LEVEL_FOOD_BONUS * 100).toFixed(2) + "%</b>", "evolve");
     showBanner("LEVEL " + after, "+" + (after * LEVEL_FOOD_BONUS * 100).toFixed(2) + "% food XP", 2.4);
   }
+  // The start screen is behind the overlay right now, but it is the first thing
+  // you see next session. Four writes against a hidden element is cheaper than
+  // reasoning about when it will next be looked at.
+  if (typeof renderStartAcct === "function") renderStartAcct();
 }
 
 /* Food XP actually granted. Only the player earns the account level bonus; NPCs
@@ -2071,6 +2094,31 @@ function renderAccountUI(){
     const b = document.getElementById(id);
     if (b) b.disabled = dis;
   });
+  renderStartAcct();
+}
+
+/* Account XP reaches 1e291 by design, so the menu cannot print it in full near
+   the top of the ladder. Below a million it is shown exactly; above that the
+   exponent, which is honestly what the number is at that size. */
+function acctNum(x){
+  if (!isFinite(x)) return "all of it";
+  return Math.abs(x) < 1e6 ? x.toFixed(1) : x.toExponential(2).replace("e+", "e");
+}
+
+/* The account level as a bar on the start screen. Reads the same lifetime
+   total as the in-game readout, so the menu and the HUD cannot disagree -- the
+   menu is just where you see it before you have eaten a single pellet. */
+function renderStartAcct(){
+  if (!el.startAcctLv) return;
+  const lp = levelProgress(acctXp);
+  el.startAcctLv.textContent = "ACCOUNT LEVEL " + lp.level;
+  el.startAcctBonus.textContent = "+" + (lp.level * LEVEL_FOOD_BONUS * 100).toFixed(2) + "% food XP";
+  el.startAcctFill.style.width = (lp.maxed ? 100 : clamp(lp.into / lp.need * 100, 0, 100)) + "%";
+  el.startAcctText.innerHTML = lp.maxed
+    ? "Top of the ladder at level " + lp.level + " &middot; <b>" + acctNum(acctXp) +
+      "</b> lifetime account XP, and it never goes down."
+    : "<b>" + acctNum(lp.into) + "</b> / " + acctNum(lp.need) + " XP toward level " + (lp.level + 1) +
+      " &middot; this total is never lost, not even when you are eaten.";
 }
 
 function esc(s){
@@ -2166,7 +2214,11 @@ const el = {
   go:       document.getElementById("go"),
   startNet: document.getElementById("startNet"),
   startRoom:document.getElementById("startRoom"),
-  startSolo:document.getElementById("startSolo")
+  startSolo:document.getElementById("startSolo"),
+  startAcctLv:    document.getElementById("startAcctLv"),
+  startAcctBonus: document.getElementById("startAcctBonus"),
+  startAcctFill:  document.getElementById("startAcctFill"),
+  startAcctText:  document.getElementById("startAcctText")
 };
 
 RANKS.forEach((r,i) => {
@@ -3016,6 +3068,7 @@ window.EvoQuest = {
   enterGame: enterGame, dropRemotePlayers: dropRemotePlayers,
   Accounts: Accounts, checkpoint: checkpoint, applyProfileToGame: applyProfileToGame,
   renderAccountUI: renderAccountUI, FB_CONFIG: FB_CONFIG,
+  renderStartAcct: renderStartAcct, acctNum: acctNum,
   get player(){ return player; },
   get cam(){ return cam; },
   get critters(){ return critters; },

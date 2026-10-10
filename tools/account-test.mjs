@@ -3,6 +3,7 @@
 //
 //   node tools\account-test.mjs
 
+import { readFileSync } from "node:fs";
 import { boot } from "./harness.mjs";
 
 const ctx = boot();
@@ -385,6 +386,89 @@ console.log("\naccount level persists and merges");
   ok("a corrupt account XP falls back to 0, not NaN", junk.acctXp === 0, junk.acctXp);
   const neg = A.sanitize({ acctXp: -50 });
   ok("a negative account XP is clamped to 0", neg.acctXp === 0, neg.acctXp);
+}
+
+// The account level is also a bar on the home screen, so it is visible before
+// you have played anything. acctXp is monotonic, so this needs a boot of its
+// own -- by here the shared context has already earned level 20.
+console.log("\nthe home screen shows the account level as a bar");
+// The harness fabricates any element id on request, so a bar built against a
+// missing element would still "work" here and render nothing in a browser.
+// Read the real markup to prove the nodes the script writes to actually exist.
+{
+  const src = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const box = (src.split('id="start"')[1] || "").split('id="sprites-data"')[0];
+  for (const id of ["startAcct", "startAcctLv", "startAcctBonus", "startAcctFill", "startAcctText"])
+    ok(`#${id} is really in the start screen`, box.includes(`id="${id}"`));
+}
+
+const M = boot().G;
+{
+  const el = M.el;
+  const bar = () => parseFloat(el.startAcctFill.style.width || "0");
+  const level = () => Number((el.startAcctLv._text.match(/(\d+)\s*$/) || [])[1]);
+
+  ok("a fresh account starts at level 0 with an empty bar",
+     level() === 0 && bar() === 0, `${el.startAcctLv._text} ${el.startAcctFill.style.width}`);
+  ok("and the bar says what the next level costs",
+     /<b>0\.0<\/b> \/ 10\.0 XP toward level 1/.test(el.startAcctText._html), el.startAcctText._html);
+  ok("level 0 buys no bonus", el.startAcctBonus._text === "+0.00% food XP", el.startAcctBonus._text);
+
+  M.awardAcctXp(10);                      // exactly the threshold for level 1
+  ok("reaching a threshold levels up", level() === 1, el.startAcctLv._text);
+  ok("and the bonus moves with it", el.startAcctBonus._text === "+0.05% food XP", el.startAcctBonus._text);
+  ok("a level boundary resets the bar to empty",
+     bar() === 0 && /toward level 2/.test(el.startAcctText._html), el.startAcctText._html);
+  ok("the bar keeps itself up to date, with no extra call",
+     el.startAcctLv._text === "ACCOUNT LEVEL 1", el.startAcctLv._text);
+
+  M.awardAcctXp(5.5);                     // halfway into level 1, which needs 11
+  ok("half a level fills the bar halfway",
+     near(bar(), 50, 0.01), el.startAcctFill.style.width);
+  ok("and the bar and the text agree on how far along that is",
+     /<b>5\.5<\/b> \/ 11\.0 XP toward level 2/.test(el.startAcctText._html), el.startAcctText._html);
+
+  M.applyProfileToGame(Object.assign(M.Accounts.blank(), { acctXp: 1e6 }));
+  M.renderStartAcct();
+  ok("the bar can never overflow its track, even at absurd totals",
+     bar() >= 0 && bar() <= 100 && !/NaN|Infinity/.test(el.startAcctFill.style.width),
+     el.startAcctFill.style.width);
+  ok("and the text never prints an unspeakable number",
+     el.startAcctText._html.length < 220 && !/Infinity|NaN/.test(el.startAcctText._html),
+     el.startAcctText._html);
+}
+
+console.log("\nthe home screen bar and the in-game readout agree");
+// Same lifetime total, two screens. If these ever disagree the player is being
+// told two different levels by the same game.
+{
+  M.start();
+  for (let i = 0; i < 8; i++) M.step(1 / 60);     // the HUD refreshes on a 0.06s tick
+  const menu = Number((M.el.startAcctLv._text.match(/(\d+)\s*$/) || [])[1]);
+  const hud = Number((M.el.sLevel._html.match(/Level <b>(\d+)<\/b>/) || [])[1]);
+  const lp = M.levelProgress(M.acctXp);
+  ok("the menu shows the level the HUD shows", menu === hud && menu === lp.level,
+     `menu ${menu}, hud ${hud}, real ${lp.level}`);
+  const menuBonus = (M.el.startAcctBonus._text.match(/\+([\d.]+)%/) || [])[1];
+  ok("and the same food XP bonus",
+     menuBonus === (lp.level * M.LEVEL_FOOD_BONUS * 100).toFixed(2), `${menuBonus} at level ${lp.level}`);
+}
+
+console.log("\naccount XP reaching 1e292 still reads sensibly on the menu");
+{
+  M.applyProfileToGame(Object.assign(M.Accounts.blank(), { acctXp: 1e292 }));
+  M.renderStartAcct();
+  ok("it shows the cap", /ACCOUNT LEVEL 7000$/.test(M.el.startAcctLv._text), M.el.startAcctLv._text);
+  ok("and a full bar rather than a NaN width",
+     M.el.startAcctFill.style.width === "100%", M.el.startAcctFill.style.width);
+  ok("and says it is maxed instead of printing a 300-digit number",
+     /Top of the ladder/.test(M.el.startAcctText._html), M.el.startAcctText._html);
+  ok("large totals are shown as exponents, small ones in full",
+     M.acctNum(1e292) === "1.00e292" && M.acctNum(21.34) === "21.3" && M.acctNum(0) === "0.0",
+     `${M.acctNum(1e292)} | ${M.acctNum(21.34)} | ${M.acctNum(0)}`);
+  ok("an infinite total does not print Infinity into the menu",
+     M.acctNum(Infinity) === "all of it" && !/Infinity/.test(M.el.startAcctText._html),
+     M.acctNum(Infinity));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
